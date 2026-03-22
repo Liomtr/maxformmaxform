@@ -113,8 +113,8 @@
               <h3>协作空间（团队 / 部门）</h3>
               <p class="desc">这里将展示你加入的团队、共享问卷与权限角色。可在此发起邀请、分配协作权限、查看修改日志。</p>
               <div class="actions">
-                <button class="team-btn" @click="alert('TODO: 创建团队')">+ 创建团队</button>
-                <button class="team-btn secondary" @click="alert('TODO: 加入团队')">加入团队</button>
+                <button class="team-btn" @click="showTodo('创建团队')">+ 创建团队</button>
+                <button class="team-btn secondary" @click="showTodo('加入团队')">加入团队</button>
               </div>
               <ul class="feature-hints">
                 <li>集中管理：按团队聚合问卷与统计</li>
@@ -129,8 +129,8 @@
               <h3>团队 / 部门管理</h3>
               <p class="desc">这里将展示组织架构下的部门分组、成员数量、问卷归属与共享范围。后续可配置部门层级与继承权限。</p>
               <div class="actions">
-                <button class="team-btn" @click="alert('TODO: 新建部门')">+ 新建部门</button>
-                <button class="team-btn secondary" @click="alert('TODO: 导入成员')">导入成员</button>
+                <button class="team-btn" @click="showTodo('新建部门')">+ 新建部门</button>
+                <button class="team-btn secondary" @click="showTodo('导入成员')">导入成员</button>
                 <button class="team-btn tertiary" @click="setMenu('profile')">去个人中心</button>
               </div>
               <ul class="feature-hints">
@@ -581,6 +581,7 @@ const formatDateTime = (v: any) => {
 const onNotifClosed = async () => { await loadUnreadCount() }
 const createSurvey = () => { router.push({ name: 'CreateSurvey' }) }
 const searchSurvey = () => { /* 可扩展为后端搜索 */ }
+const showTodo = (label: string) => { window.alert(`TODO: ${label}`) }
 const fetchSurveys = async () => {
   loading.value = true
   if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null }
@@ -766,8 +767,8 @@ const deleteFolderConfirm = async (f: FolderDTO) => {
       cancelButtonText: '取消'
     })
     // 先释放文件夹内问卷到根目录
-    const surveysInFolder = await listSurveys({ folderId: f.id })
-    if (Array.isArray(surveysInFolder) && surveysInFolder.length) {
+    const surveysInFolder = surveys.value.filter((s:any) => Number(s.folderId) === Number(f.id))
+    if (surveysInFolder.length) {
       await Promise.all(
         surveysInFolder.map((s:any) => moveSurvey(String(s.id ?? s._id), null))
       )
@@ -791,6 +792,7 @@ const onDuplicate = async (survey:any) => {
       title: `副本 - ${src.title}`,
       description: src.description || '',
       questions: (src.questions || []).map((q:any, idx:number) => ({
+        id: String(q.id ?? `q${idx + 1}`),
         // 后端会 normalize type/options
         type: q.type,
         title: q.title,

@@ -21,6 +21,10 @@
       <header class="m-header">
   <h1 class="m-title">{{ survey.title }}</h1>
         <div v-if="survey.description" class="m-desc" v-html="safeHtml(survey.description)"></div>
+        <div v-if="survey.settings?.showProgress" class="m-progress-panel">
+          <div class="m-progress-copy">进度 {{ answeredVisibleQuestions }}/{{ totalVisibleQuestions }}</div>
+          <el-progress :percentage="progressPercent" :show-text="false" :stroke-width="8" />
+        </div>
       </header>
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="m-form">
@@ -111,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getSurvey, getSurveyByShareCode, submitResponses } from '@/api/surveys'
 import type { Survey } from '@/types/survey'
@@ -141,6 +145,31 @@ const defaultApplied = ref<Record<string, boolean>>({})
 // 跳题
 const jumpStartAfter = ref<number | null>(null)
 const jumpHideUntil = ref<number | null>(null)
+const totalVisibleQuestions = computed(() => {
+  const questions = survey.value?.questions || []
+  if (!questions.length) return 0
+
+  const visibleCount = questions.filter((_, index) => visibleMap.value[String(index + 1)] !== false).length
+  return visibleCount || questions.length
+})
+const answeredVisibleQuestions = computed(() => {
+  const questions = survey.value?.questions || []
+  return questions.reduce((count, q: any, index: number) => {
+    if (visibleMap.value[String(index + 1)] === false) return count
+
+    const key = String(q.id ?? (index + 1))
+    const value = form.value[key]
+    const answered = Array.isArray(value)
+      ? value.length > 0
+      : value !== undefined && value !== null && String(value).trim() !== ''
+
+    return count + (answered ? 1 : 0)
+  }, 0)
+})
+const progressPercent = computed(() => {
+  if (!totalVisibleQuestions.value) return 0
+  return Math.min(100, Math.round((answeredVisibleQuestions.value / totalVisibleQuestions.value) * 100))
+})
 
 // 简易 shuffle（与桌面版一致）
 function randShuffle<T>(arr: T[]): T[] { const a=[...arr]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]] } return a }
@@ -215,7 +244,7 @@ function filteredOptions(q:any, idx:number){
     plan = merged
     groupPlanCache.value[qKey] = plan
   }
-  const allow = new Set(withQuota.map(o=> String(o.value)))
+  const allow = new Set(withQuota.map((o:any)=> String(o.value)))
   const out:any[] = []; let pending:any=null
   for(const it of plan){
     if (it && it.__groupHeader){ pending=it; continue }
@@ -257,7 +286,7 @@ function applyDefaultIfNeeded(q:any, idx:number){
 // 初始化 + 加载问卷
 onMounted(async () => {
   if (props.injectedSurvey) {
-    survey.value = props.injectedSurvey
+    survey.value = JSON.parse(JSON.stringify(props.injectedSurvey))
   } else {
     try {
       const shareId = String(route.params.id || '')
@@ -268,7 +297,7 @@ onMounted(async () => {
         survey.value = null
       }
     } catch (e:any) {
-      const status = e?.response?.status; const msg = e?.response?.data?.message; const meta = e?.response?.data?.data
+      const status = e?.response?.status; const msg = e?.response?.data?.error?.message || e?.response?.data?.message; const meta = e?.response?.data?.data
       if (status===404) errorMsg.value = msg || '问卷不存在或已删除'
       else if (status===403){ errorMsg.value = msg || '问卷未发布或已关闭'; if (meta) closedMeta.value = { title: meta.title, closedAt: meta.closedAt, status: meta.status } }
       else errorMsg.value = '加载失败，请稍后重试'
@@ -276,6 +305,9 @@ onMounted(async () => {
     }
   }
   if (survey.value) {
+    if (survey.value.settings?.randomizeQuestions || (survey.value.settings as any)?.randomOrder) {
+      survey.value.questions = randShuffle(survey.value.questions || [])
+    }
     const nextRules: FormRules = {}
     survey.value.questions.forEach((q:any, index:number) => {
       const key = String(q.id ?? (index+1))
@@ -439,6 +471,8 @@ function safeHtml(raw:string){
 .m-header { margin-bottom:12px; }
 .m-title { font-size:22px; font-weight:700; text-align:center; color: var(--el-color-primary,#409eff); margin:4px 0 16px; }
 .m-desc { color:#555; font-size:14px; line-height:1.55; }
+.m-progress-panel { margin-top:12px; padding:10px 12px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; }
+.m-progress-copy { margin-bottom:8px; color:#475569; font-size:13px; font-weight:600; }
 .m-desc :deep(iframe),
 .m-desc :deep(.qfe-iframe),
 .m-q-desc :deep(iframe),

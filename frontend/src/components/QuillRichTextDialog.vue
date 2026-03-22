@@ -287,6 +287,7 @@ const videoUrlRef = ref<HTMLInputElement|null>(null)
 const videoRange = ref<any>(null)
 
 const imageInputRef = ref<HTMLInputElement|null>(null)
+const audioInputRef = ref<HTMLInputElement|null>(null)
 
 const contentLength = computed(()=> (quill.value ? quill.value.getText().trim().length : 0))
 const remaining = computed(()=> props.maxLength>0 ? Math.max(0, props.maxLength - contentLength.value) : Infinity)
@@ -450,7 +451,7 @@ function onImagePicked(e:Event){
       quill.value.insertEmbed(idx, 'image', base64, 'user')
       safeSetSelection(idx+1,0)
     }
-    reader.readAsDataURL(file)
+    reader.readAsDataURL(file as Blob)
   }
 }
 function insertVideo(){
@@ -487,12 +488,12 @@ function confirmVideo(){
   } else if(/\.(mp4|webm|ogg|m3u8)(\?|#|$)/i.test(input)) {
     // 2. 视频直链：使用 <video controls>
     const html = `<video src="${input}" controls playsinline preload="metadata" style="max-width:100%;display:block;margin:10px 0;border-radius:6px;">您的浏览器不支持 video 标签</video>`
-    const delta = quill.value.clipboard.convert(html)
+    const delta = (quill.value.clipboard as any).convert(html)
     quill.value.updateContents(new (Quill as any).Delta().retain(idx).delete(range.length || 0).concat(delta), 'user')
   } else if(/\.(mp3|wav|aac|ogg)(\?|#|$)/i.test(input)) {
     // 3. 音频直链
     const html = `<audio src="${input}" controls preload="metadata" style="display:block;margin:10px 0;max-width:100%;">您的浏览器不支持 audio 标签</audio>`
-    const delta = quill.value.clipboard.convert(html)
+    const delta = (quill.value.clipboard as any).convert(html)
     quill.value.updateContents(new (Quill as any).Delta().retain(idx).delete(range.length || 0).concat(delta), 'user')
   } else if(input.startsWith('http')) {
     // 4. http(s) 链接：识别 B站普通页面 URL -> 转成播放器 iframe
@@ -513,6 +514,16 @@ function confirmVideo(){
   safeSetSelection(idx+1,0)
   showVideoDialog.value = false
 }
+function embedAudio(url: string){
+  if (!quill.value) return
+  const range = quill.value.getSelection(true)
+  const idx = range ? range.index : quill.value.getLength()
+  const html = `<audio src="${url}" controls preload="metadata" style="display:block;margin:10px 0;max-width:100%;">您的浏览器不支持 audio 标签</audio>`
+  const delta = (quill.value.clipboard as any).convert(html)
+  quill.value.updateContents(new (Quill as any).Delta().retain(idx).concat(delta), 'user')
+  safeSetSelection(idx + 1, 0)
+}
+
 function insertAudio(){
   const pick = window.confirm('选择 “确定” 输入远程音频 URL，选择 “取消” 进行本地文件上传。')
   if(pick){
@@ -525,14 +536,14 @@ function insertAudio(){
 
 
 function registerHrBlot(){
-  if(Quill.imports['formats/hr']) return
+  if((Quill as any).imports['formats/hr']) return
   const BlockEmbed = Quill.import('blots/block/embed')
   class Hr extends BlockEmbed { static blotName = 'hr'; static tagName = 'hr'; static className = 'qrd-hr' }
   Quill.register(Hr as any, true)
 }
 
 function registerIframeBlot(){
-  if(Quill.imports['formats/iframe']) return
+  if((Quill as any).imports['formats/iframe']) return
   const BlockEmbed = Quill.import('blots/block/embed')
   class IframeBlot extends BlockEmbed {
     static blotName = 'iframe'
@@ -621,7 +632,7 @@ watch(()=>props.content, v=>{
     const sel = quill.value.getSelection()
     quill.value.root.innerHTML = v || ''
     updateEmpty()
-    if(sel) quill.value.setSelection(sel)
+    if(sel) (quill.value as any).setSelection(sel)
   }
 })
 watch(()=>props.modelValue, v=>{ 
@@ -652,8 +663,8 @@ function safeSetSelection(index:number, length:number){
 function destroyQuill(){
   if(quill.value){
     // 移除事件监听
-    quill.value.off('text-change')
-    quill.value.off('selection-change')
+    ;(quill.value as any).off('text-change')
+    ;(quill.value as any).off('selection-change')
   }
   quill.value = null
   ready.value = false

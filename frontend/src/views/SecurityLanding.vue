@@ -108,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 const router = useRouter()
 const goHome = ()=> router.push('/')
@@ -151,7 +151,7 @@ const calcArc = (val:number)=>{
 
 onMounted(()=>{
   gaugePath.value = calcArc(gauge.value)
-  const t = setInterval(()=> {
+  setInterval(()=> {
     gauge.value = 55 + Math.round(Math.random()*10)
     progress.value = 25 + Math.round(Math.random()*50)
     gaugePath.value = calcArc(gauge.value)
@@ -235,4 +235,36 @@ const submitMail = ()=> { if(validMail.value){ submitted.value = true; console.l
 .thanks { font-size:13px; color:#4f8bff; }
 .center { text-align:center; margin-top:-10px; color:#5b6672; }
 
-@media (max-width:1080px){ .hero-inner { flex-direction:column; gap:60px; } .hero-visual { order:-1; } .hero-bottom-cards { flex-direction:column; margin-top
+@media (max-width:1080px){
+  .hero-inner { flex-direction:column; gap:60px; }
+  .hero-visual { order:-1; min-height:320px; }
+  .hero-bottom-cards { flex-direction:column; margin-top:24px; }
+  .panel-a { left:20px; }
+  .panel-b { left:140px; }
+  .panel-c { left:60px; width:min(360px, calc(100% - 80px)); }
+}
+
+@media (max-width:768px){
+  .sl-nav .inner { padding:0 16px; }
+  .nav-links { gap:12px; }
+  .nav-links a { display:none; }
+  .hero-full { padding:110px 0 80px; }
+  .hero-inner { padding:0 16px; gap:32px; }
+  .hero-left h1 { font-size:32px; }
+  .hero-left .sub { font-size:14px; }
+  .cta-row { flex-wrap:wrap; }
+  .hero-visual { min-height:260px; width:100%; }
+  .panel-a { width:180px; height:140px; left:0; }
+  .panel-b { width:180px; height:140px; left:auto; right:0; top:24px; }
+  .panel-c { width:100%; left:0; top:96px; min-height:180px; }
+  .hero-bottom-cards { padding:0 16px; }
+  .section { padding:70px 16px; }
+  .mail-capture { flex-direction:column; }
+}
+
+@keyframes float {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+  100% { transform: translateY(0); }
+}
+</style>

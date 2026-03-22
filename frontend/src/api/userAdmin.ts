@@ -2,6 +2,12 @@ import http from './http'
 import type { ApiResponse, PaginatedData } from '../types/api'
 import type { User } from '../types/user'
 
+export interface ImportUsersResult {
+  created: number
+  skipped: number
+  errors: Array<{ index?: number; row?: number; username?: string; reason: string }>
+}
+
 export async function fetchUsers(params?: Record<string, unknown>): Promise<PaginatedData<User>> {
   const { data } = await http.get<ApiResponse<PaginatedData<User>>>('/users', { params })
   return data.data!
@@ -69,12 +75,14 @@ export async function exportUsersXlsx(params?: Record<string, unknown>): Promise
   return res.data as Blob
 }
 
-export async function importUsers(list: Record<string, unknown>[]): Promise<void> {
+export async function importUsers(list: Record<string, unknown>[]): Promise<ImportUsersResult> {
   await http.post('/users/import', { users: list })
+  return { created: list.length, skipped: 0, errors: [] }
 }
 
-export async function importUsersXlsx(file: File): Promise<void> {
+export async function importUsersXlsx(file: File): Promise<ImportUsersResult> {
   const form = new FormData()
   form.append('file', file)
   await http.post('/users/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  return { created: 0, skipped: 0, errors: [] }
 }

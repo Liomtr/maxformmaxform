@@ -325,7 +325,7 @@ function setupCustomSizes(){
 }
 
 function registerIframeBlot(){
-  if(Quill.imports['formats/iframe']) return
+  if((Quill as any).imports['formats/iframe']) return
   const BlockEmbed = Quill.import('blots/block/embed')
   class IframeBlot extends BlockEmbed {
     static blotName = 'iframe'
@@ -561,12 +561,12 @@ function confirmVideo(){
     // 2. 明确的视频直链：使用自定义 html embed，带 controls
     const html = `<video src="${input}" controls playsinline preload="metadata" style="max-width:100%;display:block;margin:10px 0;border-radius:6px;">您的浏览器不支持 video 标签</video>`
     // 用 clipboard dangerouslyPasteHTML 在当前位置插入 HTML（保持一个 blot）
-    const delta = quill.value.clipboard.convert(html)
+    const delta = (quill.value.clipboard as any).convert(html)
     quill.value.updateContents(new (Quill as any).Delta().retain(index).delete(videoRange.value.length || 0).concat(delta), 'user')
   } else if(/\.(mp3|wav|aac|ogg)(\?|#|$)/i.test(input)) {
     // 3. 音频直链
     const html = `<audio src="${input}" controls preload="metadata" style="display:block;margin:10px 0;max-width:100%;">您的浏览器不支持 audio 标签</audio>`
-    const delta = quill.value.clipboard.convert(html)
+    const delta = (quill.value.clipboard as any).convert(html)
     quill.value.updateContents(new (Quill as any).Delta().retain(index).delete(videoRange.value.length || 0).concat(delta), 'user')
   } else if(input.startsWith('http')) {
     // 4. 其它 http(s) 链接：尝试识别 B站常规页面 URL 并转为播放器 iframe
@@ -632,7 +632,7 @@ function onAdvancedConfirm(html: string){
   // 尝试恢复光标位置
   if(sel) {
     try {
-      quill.value.setSelection(sel)
+      ;(quill.value as any).setSelection(sel)
     } catch(e) {
       // 如果位置无效，将光标放到末尾
       quill.value.setSelection(quill.value.getLength(), 0)
@@ -658,7 +658,7 @@ watch(()=>props.modelValue, (val)=>{
     const sel = quill.value.getSelection()
     quill.value.root.innerHTML = val || ''
     checkEmpty()
-    if (sel) quill.value.setSelection(sel)
+    if (sel) (quill.value as any).setSelection(sel)
   }
 })
 </script>
