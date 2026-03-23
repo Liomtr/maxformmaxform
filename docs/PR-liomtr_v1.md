@@ -1,64 +1,64 @@
 # PR: liomtr_v1
 
-## Title
+## 标题
 
-fix: restore backend smoke path, recover frontend build, and clean temporary test scripts
+fix: 恢复后端核心提交流程、修复前端构建，并清理临时测试脚本
 
-## Branch
+## 分支信息
 
-- Source: `liomtr_v1`
-- Target: `main`
+- 源分支：`liomtr_v1`
+- 目标分支：`main`
 
-## Summary
+## 摘要
 
-This PR completes three pieces of work:
+本次 PR 主要完成了三部分工作：
 
-1. Restores the backend core survey flow and verifies it against MySQL on port `3309`.
-2. Fixes the frontend TypeScript and Vite build blockers so production build succeeds again.
-3. Removes temporary test scripts that were only used for one-off validation and were no longer aligned with the current API contract.
+1. 恢复后端问卷核心流程，并在 `3309` 端口的 MySQL 环境下完成冒烟验证。
+2. 修复前端 TypeScript 与 Vite 构建阻塞问题，使生产构建重新通过。
+3. 删除仅用于一次性验证、且已不符合当前 API 契约的临时测试脚本。
 
-## Main Changes
+## 主要改动
 
-### Backend
+### 后端
 
-- Added and completed `backend/src/models/Survey.js`
-- Repaired survey access control and manager-only operations
-- Repaired answer access control and export/delete authorization
-- Repaired file ownership checks and disabled anonymous image upload
-- Updated `initAdmin.js` to match the current `Knex + MySQL` stack
-- Added compatibility support for user lookup and survey filtering used by the admin frontend
-- Enforced survey settings such as:
+- 补充并完善 `backend/src/models/Survey.js`
+- 修复问卷访问控制及仅管理员可执行的操作
+- 修复答卷相关的访问控制、导出权限与删除权限
+- 修复文件归属校验，并禁用匿名图片上传
+- 更新 `initAdmin.js`，使其适配当前 `Knex + MySQL` 技术栈
+- 为管理端前端依赖的用户查询与问卷筛选增加兼容支持
+- 补齐并落实以下问卷配置能力：
   - `endTime`
-  - duplicate submission blocking
-  - single submission behavior
+  - 阻止重复提交
+  - 单次提交限制
 
-### Frontend
+### 前端
 
-- Fixed TypeScript contract mismatches across `types`, `api`, and `views`
-- Fixed Quill-related component typing/runtime compatibility issues
-- Reworked several admin pages into minimal implementations compatible with the current backend
-- Fixed `SecurityLanding.vue` template/style truncation
-- Restored successful `vue-tsc --noEmit` and `vite build`
+- 修复 `types`、`api`、`views` 之间的 TypeScript 契约不一致问题
+- 修复 Quill 相关组件的类型与运行时兼容性问题
+- 将多个管理页调整为与当前后端能力匹配的最小可用实现
+- 修复 `SecurityLanding.vue` 模板与样式截断问题
+- 恢复 `vue-tsc --noEmit` 和 `vite build` 的成功执行
 
-### Docs
+### 文档
 
-- Updated:
+- 更新以下文档：
   - `docs/开发日志-2026-03-22.md`
   - `docs/测试报告-2026-03-22.md`
-- Added this PR document:
+- 新增本 PR 文档：
   - `docs/PR-liomtr_v1.md`
 
-### Repository Cleanup
+### 仓库清理
 
-- Removed temporary scripts:
+- 删除临时脚本：
   - `test-submit-answers.js`
   - `test_8digit_code.js`
 
-## Verification
+## 验证
 
-### Backend smoke test
+### 后端冒烟测试
 
-Verified with:
+验证环境如下：
 
 - `DB_HOST=127.0.0.1`
 - `DB_PORT=3309`
@@ -66,47 +66,47 @@ Verified with:
 - `DB_PASSWORD=123456`
 - `DB_NAME=survey_system`
 
-Passed:
+已通过项：
 
 - `/health`
 - register
 - login
 - create survey
 - publish survey
-- read published survey by share code
+- 通过 share code 读取已发布问卷
 - submit responses
 - fetch results
-- block public access to draft surveys
-- block duplicate submission from same IP
+- 阻止公开访问草稿问卷
+- 阻止同一 IP 重复提交
 
-### Frontend build
+### 前端构建验证
 
-Executed:
+执行命令：
 
 ```bash
 cmd /c npm run build
 ```
 
-Passed:
+已通过项：
 
 - `vue-tsc --noEmit`
 - `vite build`
 
-## Risks / Notes
+## 风险与说明
 
-- Build now passes, but Vite still reports large chunk-size warnings.
-- Some admin pages were intentionally simplified to match currently implemented backend capability instead of preserving unsupported placeholder behavior.
-- Temporary validation scripts were removed on purpose to avoid future misuse.
+- 当前构建虽然已通过，但 Vite 仍然会提示 chunk 体积过大的警告。
+- 部分管理页被有意简化，以匹配当前后端实际已实现的能力，而不是继续保留未落地的占位行为。
+- 临时验证脚本是有意删除的，目的是避免后续继续被误用。
 
-## Suggested Review Focus
+## 建议评审重点
 
-1. Survey/answer/file authorization rules in backend routes
-2. Frontend API/type alignment after the compatibility fixes
-3. Simplified admin pages and whether any unsupported placeholder behavior should be restored later
-4. Whether chunk splitting should be handled in a follow-up PR
+1. 后端路由中问卷、答卷、文件相关的鉴权规则
+2. 前端兼容修复后 API 与类型定义是否已经对齐
+3. 简化后的管理页是否满足当前业务需求，是否需要后续恢复部分占位能力
+4. 是否需要在后续 PR 中继续处理前端 chunk 拆分问题
 
-## Suggested Follow-ups
+## 后续建议
 
-1. Add formal integration tests for survey, answer, and file flows
-2. Optimize large frontend chunks
-3. Continue cleaning legacy admin/API placeholder surfaces
+1. 为问卷、答卷、文件流程补充正式的集成测试
+2. 优化前端大体积 chunk
+3. 继续清理遗留的管理端与 API 占位逻辑

@@ -76,8 +76,8 @@ export async function exportUsersXlsx(params?: Record<string, unknown>): Promise
 }
 
 export async function importUsers(list: Record<string, unknown>[]): Promise<ImportUsersResult> {
-  await http.post('/users/import', { users: list })
-  return { created: list.length, skipped: 0, errors: [] }
+  const { data } = await http.post<ApiResponse<ImportUsersResult>>('/users/import', { users: list })
+  return data.data || { created: 0, skipped: list.length, errors: [] }
 }
 
 export async function importUsersXlsx(file: File): Promise<ImportUsersResult> {

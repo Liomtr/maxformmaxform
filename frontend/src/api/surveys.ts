@@ -2,7 +2,7 @@ import http from './http'
 import type { ApiResponse, PaginatedData } from '../types/api'
 import type { Survey, SurveyForm } from '../types/survey'
 
-export async function listSurveys(params?: { page?: number; pageSize?: number; status?: string; creator_id?: number | string; createdBy?: string }): Promise<PaginatedData<Survey>> {
+export async function listSurveys(params?: { page?: number; pageSize?: number; status?: string; creator_id?: number | string; createdBy?: string; folder_id?: number | null }): Promise<PaginatedData<Survey>> {
   const { data } = await http.get<ApiResponse<PaginatedData<Survey>>>('/surveys', { params })
   return data.data!
 }
@@ -65,21 +65,26 @@ export async function getResults(id: string | number) {
 }
 
 export async function moveSurvey(_id: string | number, _folderId: number | null): Promise<void> {
-  // Folder feature placeholder
+  await http.put(`/surveys/${_id}/folder`, { folder_id: _folderId })
 }
 
 export async function listTrash(): Promise<Survey[]> {
-  return []
+  const { data } = await http.get<ApiResponse<Survey[]>>('/surveys/trash')
+  return data.data || []
 }
 
 export async function restoreSurvey(_id: string | number): Promise<Survey | null> {
-  return null
+  const { data } = await http.post<ApiResponse<Survey>>(`/surveys/${_id}/restore`)
+  return data.data || null
 }
 
-export async function forceDeleteSurvey(_id: string | number): Promise<void> {}
+export async function forceDeleteSurvey(_id: string | number): Promise<void> {
+  await http.delete(`/surveys/${_id}/force`)
+}
 
 export async function clearTrash(): Promise<{ success: boolean; deleted: number }> {
-  return { success: true, deleted: 0 }
+  const { data } = await http.delete<ApiResponse<{ deleted: number }>>('/surveys/trash')
+  return { success: !!data.success, deleted: data.data?.deleted || 0 }
 }
 
 export type { Survey as SurveyDTO } from '../types/survey'

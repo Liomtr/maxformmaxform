@@ -1,3 +1,6 @@
-export async function fetchAudits(_params?: Record<string, unknown>) {
-  return { success: true, data: [], page: 1, pageSize: 20, total: 0 }
+import http from './http'
+
+export async function fetchAudits(params?: Record<string, unknown>) {
+  const { data } = await http.get('/audits', { params })
+  return data
 }
