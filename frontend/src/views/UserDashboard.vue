@@ -110,34 +110,125 @@
           <!-- 协作团队视图占位 -->
           <template v-if="activeMenu==='team'">
             <div class="team-placeholder">
-              <h3>协作空间（团队 / 部门）</h3>
-              <p class="desc">这里将展示你加入的团队、共享问卷与权限角色。可在此发起邀请、分配协作权限、查看修改日志。</p>
+              <h3>协作空间</h3>
+              <p class="desc">当前版本将团队协作先收敛到部门与成员模型中，优先复用现有权限与组织数据。你可以在这里查看协作概览，并跳转到部门管理执行实际操作。</p>
               <div class="actions">
-                <button class="team-btn" @click="showTodo('创建团队')">+ 创建团队</button>
-                <button class="team-btn secondary" @click="showTodo('加入团队')">加入团队</button>
+                <button class="team-btn" @click="handleTeamAction('create')">+ 创建协作组</button>
+                <button class="team-btn secondary" @click="handleTeamAction('join')">查看加入方式</button>
+                <button class="team-btn tertiary" @click="setMenu('department')">进入部门管理</button>
+              </div>
+              <div class="team-stats">
+                <div class="team-stat-card">
+                  <span class="label">协作部门</span>
+                  <strong>{{ departments.length }}</strong>
+                </div>
+                <div class="team-stat-card">
+                  <span class="label">成员总数</span>
+                  <strong>{{ dashboardMembers.length }}</strong>
+                </div>
+                <div class="team-stat-card">
+                  <span class="label">启用成员</span>
+                  <strong>{{ activeMemberCount }}</strong>
+                </div>
+              </div>
+              <div v-if="!isAdminUser" class="team-inline-note">
+                当前账号不是管理员，只展示协作概览。需要创建部门或导入成员时，请使用管理员账号登录。
               </div>
               <ul class="feature-hints">
-                <li>集中管理：按团队聚合问卷与统计</li>
-                <li>多角色：管理员 / 编辑者 / 只读访客</li>
-                <li>协同操作：实时编辑留痕（计划中）</li>
-                <li>安全策略：团队成员离职自动收回权限</li>
+                <li>当前协作组织以部门为单位，便于直接复用现有 RBAC 与成员接口。</li>
+                <li>创建协作组会落到部门数据中，后续若独立 Team 模型成熟可再平滑迁移。</li>
+                <li>成员新增支持批量导入，可直接指定邮箱与所属部门。</li>
+                <li>普通账号暂不开放组织写操作，避免在未收口的权限模型下继续放大边界。</li>
               </ul>
             </div>
           </template>
           <template v-else-if="activeMenu==='department'">
             <div class="team-placeholder">
               <h3>团队 / 部门管理</h3>
-              <p class="desc">这里将展示组织架构下的部门分组、成员数量、问卷归属与共享范围。后续可配置部门层级与继承权限。</p>
+              <p class="desc">这里接入当前后端已可用的部门与成员接口，先提供最小可用的组织管理面板。管理员可以直接新建部门、批量导入成员；普通用户则只读查看组织概览。</p>
               <div class="actions">
-                <button class="team-btn" @click="showTodo('新建部门')">+ 新建部门</button>
-                <button class="team-btn secondary" @click="showTodo('导入成员')">导入成员</button>
-                <button class="team-btn tertiary" @click="setMenu('profile')">去个人中心</button>
+                <button class="team-btn" @click="openDeptDialog" :disabled="!isAdminUser">+ 新建部门</button>
+                <button class="team-btn secondary" @click="openImportMembersDialog" :disabled="!isAdminUser">导入成员</button>
+                <button class="team-btn tertiary" @click="loadOrgData" :disabled="orgLoading">刷新组织数据</button>
+              </div>
+              <div v-if="!isAdminUser" class="team-inline-note">
+                当前账号不是管理员，因此组织数据只读展示，写操作按钮已禁用。
+              </div>
+              <div class="team-stats">
+                <div class="team-stat-card">
+                  <span class="label">部门数量</span>
+                  <strong>{{ departments.length }}</strong>
+                </div>
+                <div class="team-stat-card">
+                  <span class="label">成员数量</span>
+                  <strong>{{ dashboardMembers.length }}</strong>
+                </div>
+                <div class="team-stat-card">
+                  <span class="label">未分配部门</span>
+                  <strong>{{ unassignedMemberCount }}</strong>
+                </div>
+              </div>
+              <div class="department-panels">
+                <section class="department-panel">
+                  <div class="panel-head">
+                    <h4>部门列表</h4>
+                    <span>{{ departments.length }} 个</span>
+                  </div>
+                  <el-table :data="departments" size="small" v-loading="orgLoading" empty-text="暂无部门数据">
+                    <el-table-column prop="id" label="ID" width="80" />
+                    <el-table-column prop="name" label="部门名称" min-width="180" />
+                    <el-table-column prop="parent_id" label="上级部门" width="100">
+                      <template #default="{ row }">{{ row.parent_id ?? '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="成员数" width="100">
+                      <template #default="{ row }">{{ memberCountByDept[row.id] ?? 0 }}</template>
+                    </el-table-column>
+                    <el-table-column v-if="isAdminUser" label="操作" width="160" fixed="right">
+                      <template #default="{ row }">
+                        <div class="member-actions">
+                          <el-button link type="primary" @click="openEditDeptDialog(row)">编辑</el-button>
+                          <el-button link type="danger" @click="removeDept(row)">删除</el-button>
+                        </div>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </section>
+                <section class="department-panel">
+                  <div class="panel-head">
+                    <h4>最近成员</h4>
+                    <span>{{ recentMembers.length }} 人</span>
+                  </div>
+                  <el-table :data="recentMembers" size="small" v-loading="orgLoading" empty-text="暂无成员数据">
+                    <el-table-column prop="username" label="账号" min-width="140" />
+                    <el-table-column prop="email" label="邮箱" min-width="180">
+                      <template #default="{ row }">{{ row.email || '-' }}</template>
+                    </el-table-column>
+                    <el-table-column label="部门" min-width="120">
+                      <template #default="{ row }">{{ deptNameById[row.dept_id || row.deptId || 0] || '未分配' }}</template>
+                    </el-table-column>
+                    <el-table-column label="状态" width="90">
+                      <template #default="{ row }">{{ isUserActive(row) ? '启用' : '禁用' }}</template>
+                    </el-table-column>
+                    <el-table-column v-if="isAdminUser" label="操作" width="220" fixed="right">
+                      <template #default="{ row }">
+                        <div class="member-actions">
+                          <el-button link type="primary" @click="openMemberDialog(row)">编辑</el-button>
+                          <el-button link :type="isUserActive(row) ? 'warning' : 'success'" @click="toggleMemberStatus(row)">
+                            {{ isUserActive(row) ? '禁用' : '启用' }}
+                          </el-button>
+                          <el-button link type="primary" @click="resetMemberPassword(row)">重置密码</el-button>
+                          <el-button link type="danger" @click="removeMember(row)">删除</el-button>
+                        </div>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </section>
               </div>
               <ul class="feature-hints">
-                <li>层级结构：支持公司 → 部门 → 小组三级（规划）</li>
-                <li>权限继承：上级策略向下继承，可单点覆盖</li>
-                <li>资源共享：部门公共问卷、模板和统计面板</li>
-                <li>审计追踪：成员操作日志（计划中）</li>
+                <li>当前版本先以“部门”承接团队能力，避免前后端再引入一套未落地的新领域模型。</li>
+                <li>部门列表与最近成员直接来自现有后端数据，便于后续继续扩展编辑、停用和分配逻辑。</li>
+                <li>导入成员采用逐条创建策略，避免依赖后端尚未提供的批量导入接口。</li>
+                <li>若后续要开放普通用户协作申请，可在此基础上增加邀请码或审批流。</li>
               </ul>
             </div>
           </template>
@@ -384,6 +475,80 @@
     </template>
   </el-dialog>
   <!-- 右侧消息抽屉 -->
+  <el-dialog v-model="deptDialogVisible" :title="deptForm.id ? '编辑部门' : '新建部门'" width="520px">
+    <el-form :model="deptForm" label-width="100px">
+      <el-form-item label="部门名称" required>
+        <el-input v-model="deptForm.name" placeholder="请输入部门名称" />
+      </el-form-item>
+      <el-form-item label="上级部门">
+        <el-select v-model="deptForm.parent_id" placeholder="可选，默认创建顶级部门" clearable style="width: 100%">
+          <el-option v-for="dept in departments.filter(item => item.id !== deptForm.id)" :key="dept.id" :label="dept.name" :value="dept.id" />
+        </el-select>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="deptDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="deptSubmitting" @click="submitDept">{{ deptForm.id ? '保存' : '创建' }}</el-button>
+      </span>
+    </template>
+  </el-dialog>
+  <el-dialog v-model="importMembersVisible" title="导入成员" width="720px">
+    <el-form :model="importMembersForm" label-width="120px">
+      <el-form-item label="默认密码">
+        <el-input v-model="importMembersForm.defaultPassword" placeholder="默认 123456" />
+      </el-form-item>
+      <el-form-item label="默认部门">
+        <el-select v-model="importMembersForm.dept_id" placeholder="留空则使用每行内的部门 ID" clearable style="width: 100%">
+          <el-option v-for="dept in departments" :key="dept.id" :label="dept.name" :value="dept.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="成员清单" required>
+        <el-input
+          v-model="importMembersForm.rows"
+          type="textarea"
+          :rows="10"
+          placeholder="每行一个成员，格式：username,email,deptId&#10;例如：zhangsan,zhangsan@example.com,2"
+        />
+      </el-form-item>
+    </el-form>
+    <div class="import-help">
+      <strong>说明：</strong>
+      每行支持 `账号,邮箱,部门ID` 三列；邮箱和部门 ID 可省略。若省略部门 ID，则使用上方“默认部门”。
+    </div>
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="importMembersVisible = false">取消</el-button>
+        <el-button type="primary" :loading="importSubmitting" @click="submitImportMembers">开始导入</el-button>
+      </span>
+    </template>
+  </el-dialog>
+  <el-dialog v-model="memberDialogVisible" title="编辑成员" width="560px">
+    <el-form :model="memberForm" label-width="100px">
+      <el-form-item label="账号">
+        <el-input :model-value="memberForm.username" disabled />
+      </el-form-item>
+      <el-form-item label="邮箱">
+        <el-input v-model="memberForm.email" placeholder="可选" />
+      </el-form-item>
+      <el-form-item label="所属部门">
+        <el-select v-model="memberForm.dept_id" placeholder="未分配部门" clearable style="width: 100%">
+          <el-option v-for="dept in departments" :key="dept.id" :label="dept.name" :value="dept.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="成员状态">
+        <el-switch v-model="memberForm.is_active" inline-prompt active-text="启用" inactive-text="禁用" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="memberDialogVisible = false">取消</el-button>
+        <el-button :loading="memberPasswordSubmitting" @click="resetEditingMemberPassword">重置密码</el-button>
+        <el-button type="danger" plain :loading="memberDeleteSubmitting" @click="removeEditingMember">删除</el-button>
+        <el-button type="primary" :loading="memberSubmitting" @click="submitMemberUpdate">保存</el-button>
+      </span>
+    </template>
+  </el-dialog>
   <el-drawer v-model="notifOpen" title="消息通知" direction="rtl" size="420px" @open="onNotifOpen" @closed="onNotifClosed">
     <div class="notif-drawer">
       <div class="notif-toolbar">
@@ -431,7 +596,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell } from '@element-plus/icons-vue'
 import { listSurveys, deleteSurvey as apiDeleteSurvey, publishSurvey, closeSurvey, getSurvey, createSurvey as apiCreateSurvey, moveSurvey, listTrash, restoreSurvey, forceDeleteSurvey, clearTrash } from '@/api/surveys'
 import { listFolders, listAllFolders, createFolder, renameFolder, deleteFolder, type FolderDTO } from '@/api/folders'
+import { listDepts, createDept, updateDept, deleteDept } from '@/api/depts'
+import { fetchUsers, createUser, updateUser, updatePassword, enableUser, disableUser, deleteUser, importUsers } from '@/api/userAdmin'
 import http from '@/api/http'
+import type { Dept, User } from '@/types/user'
 // 已移除编码逻辑，直接使用数字ID
 const router = useRouter()
 // 顶栏品牌图片：若存在 public/brand-logo.png 则优先显示；否则回退内联图标
@@ -475,6 +643,308 @@ const allFolders = ref<FolderDTO[]>([])
 const childFolders = ref<FolderDTO[]>([])
 const currentFolderId = ref<number|null>(null)
 const breadcrumb = ref<FolderDTO[]>([])
+const orgLoading = ref(false)
+const departments = ref<Dept[]>([])
+const dashboardMembers = ref<User[]>([])
+const deptDialogVisible = ref(false)
+const deptSubmitting = ref(false)
+const deptForm = ref<{ id: number | null; name: string; parent_id: number | null }>({ id: null, name: '', parent_id: null })
+const importMembersVisible = ref(false)
+const importSubmitting = ref(false)
+const importMembersForm = ref<{ rows: string; dept_id: number | null; defaultPassword: string }>({
+  rows: '',
+  dept_id: null,
+  defaultPassword: '123456'
+})
+const memberDialogVisible = ref(false)
+const memberSubmitting = ref(false)
+const memberPasswordSubmitting = ref(false)
+const memberDeleteSubmitting = ref(false)
+const memberForm = ref<{ id: number | string | null; username: string; email: string; dept_id: number | null; is_active: boolean }>({
+  id: null,
+  username: '',
+  email: '',
+  dept_id: null,
+  is_active: true
+})
+const isUserActive = (user: Partial<User>) => {
+  if (typeof user.is_active === 'boolean') return user.is_active
+  if (typeof user.isActive === 'boolean') return user.isActive
+  return true
+}
+const deptNameById = computed<Record<number, string>>(() => {
+  return departments.value.reduce((acc, dept) => {
+    acc[dept.id] = dept.name
+    return acc
+  }, {} as Record<number, string>)
+})
+const memberCountByDept = computed<Record<number, number>>(() => {
+  return dashboardMembers.value.reduce((acc, user) => {
+    const deptId = Number(user.dept_id ?? user.deptId ?? 0)
+    if (!deptId) return acc
+    acc[deptId] = (acc[deptId] || 0) + 1
+    return acc
+  }, {} as Record<number, number>)
+})
+const activeMemberCount = computed(() => dashboardMembers.value.filter(isUserActive).length)
+const unassignedMemberCount = computed(() => {
+  return dashboardMembers.value.filter(user => !Number(user.dept_id ?? user.deptId ?? 0)).length
+})
+const recentMembers = computed(() => {
+  const getTime = (user: Partial<User>) => {
+    const raw = user.created_at || user.createdAt || ''
+    const parsed = Date.parse(String(raw))
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+  return [...dashboardMembers.value].sort((a, b) => getTime(b) - getTime(a)).slice(0, 8)
+})
+const ensureAdminAction = () => {
+  if (isAdminUser.value) return true
+  ElMessage.warning('当前账号不是管理员，无法执行组织写操作')
+  return false
+}
+const loadOrgData = async () => {
+  if (!isAdminUser.value) {
+    departments.value = []
+    dashboardMembers.value = []
+    return
+  }
+  orgLoading.value = true
+  try {
+    const [deptList, userPage] = await Promise.all([
+      listDepts(),
+      fetchUsers({ page: 1, pageSize: 200 })
+    ])
+    departments.value = deptList
+    dashboardMembers.value = userPage.list || []
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error?.message || e?.response?.data?.message || '加载组织数据失败')
+  } finally {
+    orgLoading.value = false
+  }
+}
+const openDeptDialog = async () => {
+  if (!ensureAdminAction()) return
+  await loadOrgData()
+  deptForm.value = { id: null, name: '', parent_id: null }
+  deptDialogVisible.value = true
+}
+const openEditDeptDialog = async (dept: Dept) => {
+  if (!ensureAdminAction()) return
+  await loadOrgData()
+  deptForm.value = {
+    id: dept.id,
+    name: dept.name,
+    parent_id: dept.parent_id ?? null
+  }
+  deptDialogVisible.value = true
+}
+const submitDept = async () => {
+  const name = deptForm.value.name.trim()
+  if (!name) {
+    ElMessage.warning('请输入部门名称')
+    return
+  }
+  if (deptForm.value.id && deptForm.value.parent_id === deptForm.value.id) {
+    ElMessage.warning('上级部门不能选择自己')
+    return
+  }
+  deptSubmitting.value = true
+  try {
+    if (deptForm.value.id) {
+      await updateDept(deptForm.value.id, {
+        name,
+        parent_id: deptForm.value.parent_id ?? undefined
+      })
+    } else {
+      await createDept({
+        name,
+        parent_id: deptForm.value.parent_id ?? undefined
+      })
+    }
+    deptDialogVisible.value = false
+    ElMessage.success(deptForm.value.id ? '部门更新成功' : '部门创建成功')
+    await loadOrgData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error?.message || e?.response?.data?.message || (deptForm.value.id ? '部门更新失败' : '部门创建失败'))
+  } finally {
+    deptSubmitting.value = false
+  }
+}
+const removeDept = async (dept: Dept) => {
+  if (!ensureAdminAction()) return
+  try {
+    const memberCount = memberCountByDept.value[dept.id] ?? 0
+    const hint = memberCount > 0 ? `该部门下有 ${memberCount} 名成员，删除时会自动清空其部门归属。` : '删除后不可恢复。'
+    await ElMessageBox.confirm(`确认删除部门 ${dept.name} 吗？${hint}`, '删除部门', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
+    await deleteDept(dept.id)
+    ElMessage.success('部门已删除')
+    await loadOrgData()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.response?.data?.error?.message || e?.response?.data?.message || '部门删除失败')
+  }
+}
+const openImportMembersDialog = async () => {
+  if (!ensureAdminAction()) return
+  await loadOrgData()
+  importMembersForm.value = { rows: '', dept_id: null, defaultPassword: '123456' }
+  importMembersVisible.value = true
+}
+const parseImportRows = () => {
+  return importMembersForm.value.rows
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const [usernameRaw = '', emailRaw = '', deptIdRaw = ''] = line.split(',').map(part => part.trim())
+      return {
+        index: index + 1,
+        username: usernameRaw,
+        email: emailRaw || undefined,
+        dept_id: deptIdRaw ? Number(deptIdRaw) : (importMembersForm.value.dept_id ?? undefined)
+      }
+    })
+}
+const submitImportMembers = async () => {
+  const rows = parseImportRows()
+  const password = (importMembersForm.value.defaultPassword || '123456').trim()
+  if (!rows.length) {
+    ElMessage.warning('请至少输入一条成员记录')
+    return
+  }
+  if (!password) {
+    ElMessage.warning('默认密码不能为空')
+    return
+  }
+  const invalid = rows.find(row => !row.username)
+  if (invalid) {
+    ElMessage.warning(`第 ${invalid.index} 行缺少账号`)
+    return
+  }
+  importSubmitting.value = true
+  try {
+    const result = await importUsers(rows.map(row => ({
+      username: row.username,
+      email: row.email,
+      dept_id: row.dept_id,
+      password
+    })))
+    if (result.created > 0) ElMessage.success(`成功导入 ${result.created} 位成员`)
+    if (result.errors.length) {
+      await ElMessageBox.alert(
+        result.errors.slice(0, 10).map(item => `第 ${item.row ?? (item.index ?? 0) + 1} 行 ${item.username || ''}: ${item.reason}`).join('\n'),
+        `有 ${result.errors.length} 条导入失败`,
+        {
+        type: 'warning'
+        }
+      )
+    } else {
+      importMembersVisible.value = false
+    }
+    await loadOrgData()
+  } finally {
+    importSubmitting.value = false
+  }
+}
+const openMemberDialog = (user: User) => {
+  if (!ensureAdminAction()) return
+  memberForm.value = {
+    id: user.id,
+    username: user.username,
+    email: user.email || '',
+    dept_id: (user.dept_id ?? user.deptId ?? null) as number | null,
+    is_active: isUserActive(user)
+  }
+  memberDialogVisible.value = true
+}
+const submitMemberUpdate = async () => {
+  if (!memberForm.value.id) return
+  memberSubmitting.value = true
+  try {
+    await updateUser(memberForm.value.id, {
+      email: memberForm.value.email.trim() || undefined,
+      dept_id: memberForm.value.dept_id,
+      is_active: memberForm.value.is_active
+    })
+    memberDialogVisible.value = false
+    ElMessage.success('成员信息已更新')
+    await loadOrgData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error?.message || e?.response?.data?.message || '成员更新失败')
+  } finally {
+    memberSubmitting.value = false
+  }
+}
+const toggleMemberStatus = async (user: User) => {
+  if (!ensureAdminAction()) return
+  try {
+    if (isUserActive(user)) await disableUser(user.id)
+    else await enableUser(user.id)
+    ElMessage.success(isUserActive(user) ? '成员已禁用' : '成员已启用')
+    await loadOrgData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error?.message || e?.response?.data?.message || '状态更新失败')
+  }
+}
+const resetMemberPassword = async (user: User) => {
+  if (!ensureAdminAction()) return
+  memberPasswordSubmitting.value = true
+  try {
+    await ElMessageBox.confirm(`确认将 ${user.username} 的密码重置为 123456 吗？`, '重置密码', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
+    await updatePassword(user.id, '123456')
+    ElMessage.success('密码已重置为 123456')
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.response?.data?.error?.message || e?.response?.data?.message || '密码重置失败')
+  } finally {
+    memberPasswordSubmitting.value = false
+  }
+}
+const removeMember = async (user: User) => {
+  if (!ensureAdminAction()) return
+  memberDeleteSubmitting.value = true
+  try {
+    await ElMessageBox.confirm(`确认删除成员 ${user.username} 吗？该操作不可恢复。`, '删除成员', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
+    await deleteUser(user.id)
+    ElMessage.success('成员已删除')
+    if (memberForm.value.id === user.id) memberDialogVisible.value = false
+    await loadOrgData()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.response?.data?.error?.message || e?.response?.data?.message || '成员删除失败')
+  } finally {
+    memberDeleteSubmitting.value = false
+  }
+}
+const resetEditingMemberPassword = async () => {
+  if (!memberForm.value.id) return
+  await resetMemberPassword({ id: memberForm.value.id, username: memberForm.value.username } as User)
+}
+const removeEditingMember = async () => {
+  if (!memberForm.value.id) return
+  await removeMember({ id: memberForm.value.id, username: memberForm.value.username } as User)
+}
+const handleTeamAction = async (action: 'create' | 'join') => {
+  if (action === 'create') {
+    if (!ensureAdminAction()) return
+    await openDeptDialog()
+    return
+  }
+  await ElMessageBox.alert('当前版本尚未独立实现团队邀请码与加入流程，协作组织暂由部门承载。你可以进入“团队/部门”页查看当前组织结构。', '协作说明', {
+    confirmButtonText: '进入部门页'
+  })
+  await setMenu('department')
+}
 const setMenu = async (menu:string) => {
   activeMenu.value = menu
   if (menu === 'folder') {
@@ -482,6 +952,8 @@ const setMenu = async (menu:string) => {
     await enterFolder(null)
   } else if (menu === 'trash') {
     await loadTrash()
+  } else if (menu === 'team' || menu === 'department') {
+    await loadOrgData()
   } else {
     await fetchSurveys()
   }
@@ -581,14 +1053,17 @@ const formatDateTime = (v: any) => {
 const onNotifClosed = async () => { await loadUnreadCount() }
 const createSurvey = () => { router.push({ name: 'CreateSurvey' }) }
 const searchSurvey = () => { /* 可扩展为后端搜索 */ }
-const showTodo = (label: string) => { window.alert(`TODO: ${label}`) }
 const fetchSurveys = async () => {
   loading.value = true
   if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null }
   // 超过 200ms 才显示骨架屏，避免闪一下
   loadingTimer = window.setTimeout(() => { delayedLoading.value = true }, 200)
   try {
-    const result = await listSurveys()
+    const result = await listSurveys(
+      activeMenu.value === 'folder' && currentFolderId.value !== null
+        ? { folder_id: currentFolderId.value }
+        : undefined
+    )
     const list = Array.isArray(result) ? result : (result as any).list || []
     surveys.value = list.map((s: any) => ({
       ...s,
@@ -614,6 +1089,7 @@ onMounted(async () => {
 onUnmounted(() => { if (msgTimer) { clearInterval(msgTimer); msgTimer = null } })
 onMounted(fetchSurveys)
 onMounted(async ()=>{ try { allFolders.value = await listAllFolders() } catch {} })
+onMounted(async () => { if (isAdminUser.value) await loadOrgData() })
 
 // 文件夹：加载并生成面包屑
 const loadFolders = async () => {
@@ -1164,6 +1640,19 @@ const lastLoginAtDisp = computed(() => localStorage.getItem('lastLoginAt') || '-
 .team-btn.secondary:hover { background:#e2e8f0; }
 .team-btn:hover { filter:brightness(1.05); }
 .team-btn.tertiary { background:#eef2ff; color:#1d4ed8; border:1px solid #c7d2fe; box-shadow:none; }
+.team-btn:disabled { cursor:not-allowed; opacity:.55; filter:none; }
+.team-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:18px; }
+.team-stat-card { background:linear-gradient(180deg,#f8fbff,#eef4ff); border:1px solid #d9e6ff; border-radius:12px; padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
+.team-stat-card .label { font-size:12px; color:#64748b; }
+.team-stat-card strong { font-size:24px; line-height:1; color:#0f172a; }
+.team-inline-note { margin-bottom:18px; padding:12px 14px; border-radius:10px; background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; font-size:13px; line-height:1.6; }
+.department-panels { display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:18px; margin-bottom:22px; }
+.department-panel { border:1px solid #e2e8f0; border-radius:12px; background:#f8fbff; padding:14px; }
+.panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; }
+.panel-head h4 { margin:0; font-size:15px; color:#0f172a; }
+.panel-head span { font-size:12px; color:#64748b; }
+.member-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.import-help { margin-top:6px; padding:12px 14px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:10px; color:#475569; font-size:13px; line-height:1.7; }
 
 /* ===== 通知抽屉样式优化 ===== */
 .notif-btn { border:none; background:transparent; cursor:pointer; padding:6px; border-radius:6px; }

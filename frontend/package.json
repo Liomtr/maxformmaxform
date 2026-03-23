@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore"
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
+    "smoke:system": "node ../scripts/system-smoke.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.1.0",
@@ -32,6 +34,7 @@
     "@vue/tsconfig": "^0.4.0",
     "eslint": "^8.45.0",
     "eslint-plugin-vue": "^9.15.1",
+    "playwright": "^1.58.2",
     "typescript": "~5.1.6",
     "vite": "^4.4.6",
     "vue-tsc": "^1.8.6"

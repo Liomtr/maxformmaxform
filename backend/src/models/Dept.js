@@ -1,6 +1,7 @@
 import knex from '../db/knex.js'
 
 const TABLE = 'depts'
+const USER_TABLE = 'users'
 
 const Dept = {
   async findById(id) {
@@ -23,6 +24,20 @@ const Dept = {
 
   async delete(id) {
     return knex(TABLE).where('id', id).del()
+  },
+
+  async countChildren(id) {
+    const row = await knex(TABLE).where('parent_id', id).count('* as cnt').first()
+    return Number(row?.cnt || 0)
+  },
+
+  async countUsers(id) {
+    const row = await knex(USER_TABLE).where('dept_id', id).count('* as cnt').first()
+    return Number(row?.cnt || 0)
+  },
+
+  async clearUsersDept(id) {
+    await knex(USER_TABLE).where('dept_id', id).update({ dept_id: null, updated_at: knex.fn.now() })
   },
 
   async list() {

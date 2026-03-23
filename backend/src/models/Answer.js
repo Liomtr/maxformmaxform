@@ -60,6 +60,11 @@ const Answer = {
   async findBySurveyId(survey_id) {
     const rows = await knex(TABLE).where('survey_id', survey_id).orderBy('submitted_at', 'desc')
     return rows.map(parseJson)
+  },
+
+  async deleteBySurveyIds(surveyIds) {
+    if (!Array.isArray(surveyIds) || surveyIds.length === 0) return 0
+    return knex(TABLE).whereIn('survey_id', surveyIds).del()
   }
 }
 
