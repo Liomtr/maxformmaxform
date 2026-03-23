@@ -38,6 +38,16 @@ const Answer = {
     return row.cnt
   },
 
+  async countByIp(survey_id, ip_address) {
+    if (!ip_address) return 0
+    const row = await knex(TABLE)
+      .where('survey_id', survey_id)
+      .where('ip_address', ip_address)
+      .count('* as cnt')
+      .first()
+    return Number(row?.cnt || 0)
+  },
+
   async lastSubmission(survey_id) {
     const row = await knex(TABLE).where('survey_id', survey_id).orderBy('submitted_at', 'desc').first()
     return parseJson(row)

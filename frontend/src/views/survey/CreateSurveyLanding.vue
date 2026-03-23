@@ -131,7 +131,7 @@ const handleUserCommand = (cmd: 'account'|'password'|'logout') => {
   }
 }
 
-const scenes = [
+const scenes: ReadonlyArray<{ key: 'survey'|'exam'|'vote'|'form'|'360'|'nps'|'satisfaction'; name: string; isNew?: boolean }> = [
   { key: 'survey', name: '调查' },
   { key: 'exam', name: '考试' },
   { key: 'vote', name: '投票' },
@@ -175,7 +175,7 @@ const tplCategories = [
   { key: 'college', name: '大学生' },
   { key: 'enterprise', name: '企业问卷' },
   { key: 'market', name: '市场调查' },
-]
+] as const
 const tplCat = ref<'all'|'college'|'enterprise'|'market'>('all')
 const tplKeyword = ref('')
 const templates = ref<TemplateCard[]>([

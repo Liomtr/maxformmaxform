@@ -1,4 +1,5 @@
 import { computed } from 'vue'
+import type { Survey } from '@/types/survey'
 
 export interface LegacyQuestionDraft {
   id: string | number
@@ -28,11 +29,18 @@ export function usePreviewSurveyMapping(surveyForm: { title:string; description:
       default: return 'input'
     }
   }
-  const mappedSurveyForPreview = computed(()=>({
-    id: 'preview-temp',
+  const mappedSurveyForPreview = computed<Survey>(() => ({
+    id: 0,
     title: surveyForm.title,
     description: surveyForm.description,
+    creator_id: 0,
+    settings: {},
+    style: {},
+    share_code: 'preview',
     status: 'published',
+    response_count: 0,
+    created_at: '',
+    updated_at: '',
     questions: (surveyForm.questions||[]).map((q:any, i:number)=>({
       id: q.id || (i+1),
       title: q.title,

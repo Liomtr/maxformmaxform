@@ -32,6 +32,10 @@
         <div class="paper-header">
           <h2 class="paper-title">{{ survey.title }}</h2>
           <div class="desc" v-if="survey.description" v-html="safeHtml(survey.description)"></div>
+          <div v-if="survey.settings?.showProgress" class="progress-panel">
+            <div class="progress-copy">进度 {{ answeredVisibleQuestions }}/{{ totalVisibleQuestions }}</div>
+            <el-progress :percentage="progressPercent" :show-text="false" :stroke-width="8" />
+          </div>
         </div>
       <el-divider />
 
@@ -145,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, nextTick, watch } from 'vue'
+import { computed, onMounted, ref, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getSurvey, getSurveyByShareCode, submitResponses } from '@/api/surveys'
 import type { Survey } from '@/types/survey'
@@ -182,6 +186,31 @@ const defaultApplied = ref<Record<string, boolean>>({})
 
 // 为分组随机生成稳定的展示计划（仅对本次会话稳定）
 const groupPlanCache = ref<Record<string, any[]>>({})
+const totalVisibleQuestions = computed(() => {
+  const questions = survey.value?.questions || []
+  if (!questions.length) return 0
+
+  const visibleCount = questions.filter((_, index) => visibleMap.value[String(index + 1)] !== false).length
+  return visibleCount || questions.length
+})
+const answeredVisibleQuestions = computed(() => {
+  const questions = survey.value?.questions || []
+  return questions.reduce((count, q: any, index: number) => {
+    if (visibleMap.value[String(index + 1)] === false) return count
+
+    const key = String(q.id ?? (index + 1))
+    const value = form.value[key]
+    const answered = Array.isArray(value)
+      ? value.length > 0
+      : value !== undefined && value !== null && String(value).trim() !== ''
+
+    return count + (answered ? 1 : 0)
+  }, 0)
+})
+const progressPercent = computed(() => {
+  if (!totalVisibleQuestions.value) return 0
+  return Math.min(100, Math.round((answeredVisibleQuestions.value / totalVisibleQuestions.value) * 100))
+})
 function randShuffle<T>(arr: T[]): T[] {
   const a = [...arr]
   for (let i=a.length-1;i>0;i--){
@@ -348,7 +377,7 @@ function filteredOptions(q:any, idx:number){
   }
   // 在可见过滤基础上，保持 plan 的顺序；隐藏的选项跳过；标题若后续无任何可见选项则自动被过滤
   // 可见选项（即便已满也保留显示但不可选）
-  const allow = new Set(withQuota.map(o => String(o.value)))
+  const allow = new Set(withQuota.map((o:any) => String(o.value)))
   const out:any[] = []
   let pendingHeader: any = null
   for (const it of plan){
@@ -409,7 +438,7 @@ function applyDefaultIfNeeded(q:any, idx:number){
 onMounted(async () => {
   try {
     if (props.injectedSurvey) {
-      survey.value = props.injectedSurvey
+      survey.value = JSON.parse(JSON.stringify(props.injectedSurvey))
       currentUrl.value = location.href
     } else {
       const shareId = String(route.params.id || '')
@@ -424,6 +453,9 @@ onMounted(async () => {
       if (!preview) generateQrCode()
     }
     if (!survey.value) return
+    if (survey.value.settings?.randomizeQuestions || (survey.value.settings as any)?.randomOrder) {
+      survey.value.questions = randShuffle(survey.value.questions || [])
+    }
     const nextRules: FormRules = {}
     survey.value.questions.forEach((q: any, index: number) => {
       const key = String(q.id ?? (index + 1))
@@ -452,7 +484,7 @@ onMounted(async () => {
     survey.value.questions.forEach((q:any, i:number)=>{ const order=i+1; if (visibleMap.value[String(order)] !== false) applyDefaultIfNeeded(q,i) })
   } catch (e:any) {
     if (!props.injectedSurvey){
-      const status = e?.response?.status; const msg = e?.response?.data?.message; const meta = e?.response?.data?.data
+      const status = e?.response?.status; const msg = e?.response?.data?.error?.message || e?.response?.data?.message; const meta = e?.response?.data?.data
       if (status === 404) errorMsg.value = msg || '问卷不存在或已删除'
       else if (status === 403){ errorMsg.value = msg || '问卷未发布或已关闭'; if (meta) closedMeta.value = { title: meta.title, closedAt: meta.closedAt, status: meta.status } }
       else errorMsg.value = '加载失败，请稍后重试'
@@ -659,6 +691,7 @@ const generateQrCode = async () => {
         
         // 清空canvas
         const ctx = qrCanvasRef.value.getContext('2d')
+        if (!ctx) return
         ctx.clearRect(0, 0, 100, 100)
         console.log('Canvas已清空，开始生成二维码...')
         
@@ -676,6 +709,7 @@ const generateQrCode = async () => {
         console.error('生成二维码失败:', err)
         // 显示错误信息
         const ctx = qrCanvasRef.value.getContext('2d')
+        if (!ctx) return
         ctx.fillStyle = '#ff0000'
         ctx.font = '12px Arial'
         ctx.fillText('生成失败', 20, 50)
@@ -861,6 +895,8 @@ function safeHtml(raw:string){
 }
 .paper-title { margin: 20px 8px 30px; font-size: 24px; font-weight: 700; text-align:center; color: var(--el-color-primary, #409eff); }
 .desc { color: #6b7280; margin: 2px 8px 8px; }
+.progress-panel { margin: 12px 8px 0; padding: 12px 14px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; }
+.progress-copy { margin-bottom: 8px; color: #475569; font-size: 13px; font-weight: 600; }
 .q-form { padding: 0 20px; }
 .q-item { margin-bottom: 30px; }
 .q-item :deep(.el-form-item__label) { font-weight: 600; color:#333333; font-size: 15px; margin-bottom: 15px; }

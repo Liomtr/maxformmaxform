@@ -14,13 +14,13 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="d in depts" :key="d._id">
-          <td>{{ d._id }}</td>
-          <td>{{ d.name }}</td>
-          <td>{{ d.parentId || '-' }}</td>
+        <tr v-for="dept in depts" :key="dept.id">
+          <td>{{ dept.id }}</td>
+          <td>{{ dept.name }}</td>
+          <td>{{ dept.parent_id || '-' }}</td>
           <td>
-            <button @click="edit(d)">编辑</button>
-            <button @click="remove(d._id)">删除</button>
+            <button @click="edit(dept)">编辑</button>
+            <button @click="remove(dept.id)">删除</button>
           </td>
         </tr>
       </tbody>
@@ -29,38 +29,41 @@
     <div v-if="showDialog" class="dialog">
       <h3>{{ editing ? '编辑部门' : '新建部门' }}</h3>
       <label>名称：<input v-model="form.name" /></label>
-      <label>上级部门ID：<input v-model="form.parentId" /></label>
+      <label>上级部门ID：<input v-model.number="form.parent_id" type="number" /></label>
       <button @click="save">保存</button>
       <button @click="close">取消</button>
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { listDepts, createDept, updateDept, deleteDept } from '@/api/depts'
-const depts = ref<any[]>([])
+import { onMounted, ref } from 'vue'
+import { createDept, deleteDept, listDepts, updateDept } from '@/api/depts'
+import type { Dept } from '@/types/user'
+
+const depts = ref<Dept[]>([])
 const showDialog = ref(false)
 const editing = ref(false)
-const form = ref<any>({ name: '', parentId: '' })
-const editId = ref<string>('')
+const form = ref<{ name: string; parent_id?: number }>({ name: '' })
+const editId = ref<number | null>(null)
 
 async function load() {
   depts.value = await listDepts()
 }
-function edit(d: any) {
+function edit(dept: Dept) {
   editing.value = true
   showDialog.value = true
-  form.value = { name: d.name, parentId: d.parentId }
-  editId.value = d._id
+  form.value = { name: dept.name, parent_id: dept.parent_id }
+  editId.value = dept.id
 }
 function close() {
   showDialog.value = false
   editing.value = false
-  form.value = { name: '', parentId: '' }
-  editId.value = ''
+  form.value = { name: '' }
+  editId.value = null
 }
 async function save() {
-  if (editing.value) {
+  if (editing.value && editId.value !== null) {
     await updateDept(editId.value, form.value)
   } else {
     await createDept(form.value)
@@ -68,12 +71,13 @@ async function save() {
   close()
   await load()
 }
-async function remove(id: string) {
+async function remove(id: number) {
   await deleteDept(id)
   await load()
 }
 onMounted(load)
 </script>
+
 <style scoped>
 .dept-page { padding: 16px; }
 .toolbar { margin-bottom: 12px; }

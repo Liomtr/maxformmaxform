@@ -2,6 +2,8 @@ import http from './http'
 import type { ApiResponse } from '../types/api'
 import type { Role } from '../types/user'
 
+export type RoleDTO = Role
+
 export async function listRoles(): Promise<Role[]> {
   const { data } = await http.get<ApiResponse<Role[]>>('/roles')
   return data.data!

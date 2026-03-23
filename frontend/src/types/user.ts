@@ -9,6 +9,16 @@ export interface User {
   last_login_at?: string
   created_at: string
   updated_at: string
+  nickname?: string
+  role?: string
+  status?: string
+  isActive?: boolean
+  deptId?: number
+  positionId?: number
+  createdAt?: string
+  lockUntil?: string | null
+  surveyCount?: number
+  submissionCount?: number
 }
 
 export interface Role {
@@ -27,4 +37,6 @@ export interface Dept {
   sort_order: number
   created_at: string
   children?: Dept[]
+  code?: string
+  status?: string
 }

@@ -72,7 +72,7 @@
   <section class="share-panel">
       <div class="link-row" :title="shareLink ? '点击复制或使用右侧按钮' : '发布问卷后才能生成分享链接'">
         <span class="link-icon">🔗</span>
-        <input class="share-input" :value="shareLink" :placeholder="shareLink ? '' : '发布问卷后生成 /s/9位码 分享链接'" readonly @click="$event.target.select()" @focus="$event.target.select()" />
+        <input class="share-input" :value="shareLink" :placeholder="shareLink ? '' : '发布问卷后生成 /s/9位码 分享链接'" readonly @click="selectInput" @focus="selectInput" />
         <button class="btn btn-copy" :disabled="!hasLink" @click="copyLink">
           <span v-if="copiedLink">✅ 已复制</span>
           <span v-else>复制</span>
@@ -276,6 +276,11 @@ function copyCode(){
 function previewEmbed(){
   if (!hasLink.value) return
   window.open(props.shareLink, '_blank')
+}
+
+function selectInput(event: Event){
+  const target = event.target
+  if (target instanceof HTMLInputElement) target.select()
 }
 </script>
 

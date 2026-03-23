@@ -2,7 +2,7 @@ import http from './http'
 import type { ApiResponse, PaginatedData } from '../types/api'
 import type { Survey, SurveyForm } from '../types/survey'
 
-export async function listSurveys(params?: { page?: number; pageSize?: number; status?: string }): Promise<PaginatedData<Survey>> {
+export async function listSurveys(params?: { page?: number; pageSize?: number; status?: string; creator_id?: number | string; createdBy?: string }): Promise<PaginatedData<Survey>> {
   const { data } = await http.get<ApiResponse<PaginatedData<Survey>>>('/surveys', { params })
   return data.data!
 }
@@ -41,13 +41,26 @@ export async function closeSurvey(id: string | number): Promise<Survey> {
   return data.data!
 }
 
-export async function submitResponses(id: string | number, answers: unknown[], duration?: number) {
-  const { data } = await http.post<ApiResponse<{ id: number }>>(`/surveys/${id}/responses`, { answers, duration })
+export async function submitResponses(id: string | number, answers: unknown[], duration?: number | Record<string, unknown>) {
+  const payload = typeof duration === 'number' || duration === undefined
+    ? { answers, duration }
+    : { answers, ...duration }
+  const { data } = await http.post<ApiResponse<{ id: number }>>(`/surveys/${id}/responses`, payload)
   return data
 }
 
 export async function getResults(id: string | number) {
-  const { data } = await http.get<ApiResponse<{ totalSubmissions: number; lastSubmitAt: string | null }>>(`/surveys/${id}/results`)
+  const { data } = await http.get<ApiResponse<{
+    totalSubmissions: number
+    lastSubmitAt: string | null
+    total?: number
+    today?: number
+    avgScore?: number
+    completionRate?: number
+    completed?: number
+    incomplete?: number
+    avgTime?: string | number
+  }>>(`/surveys/${id}/results`)
   return data.data!
 }
 

@@ -15,14 +15,14 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="p in projects" :key="p._id">
-          <td>{{ p._id }}</td>
-          <td>{{ p.title }}</td>
-          <td>{{ p.status }}</td>
-          <td>{{ formatDate(p.createdAt) }}</td>
+        <tr v-for="project in projects" :key="project.id">
+          <td>{{ project.id }}</td>
+          <td>{{ project.title }}</td>
+          <td>{{ project.status }}</td>
+          <td>{{ formatDate(project.created_at) }}</td>
           <td>
-            <button @click="edit(p)">编辑</button>
-            <button @click="remove(p._id)">删除</button>
+            <button @click="edit(project)">编辑</button>
+            <button @click="remove(project.id)">删除</button>
           </td>
         </tr>
       </tbody>
@@ -37,52 +37,54 @@
     </div>
   </div>
 </template>
+
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { listSurveys as listProjects } from '@/api/surveys'
-const createProject = async (_p: any) => {}
-const updateProject = async (_id: any, _p: any) => {}
-const deleteProject = async (_id: any) => {}
-const projects = ref<any[]>([])
+import { onMounted, ref } from 'vue'
+import { createSurvey, deleteSurvey, listSurveys, updateSurvey } from '@/api/surveys'
+import type { Survey } from '@/types/survey'
+
+const projects = ref<Survey[]>([])
 const showDialog = ref(false)
 const editing = ref(false)
-const form = ref<any>({ title: '', description: '' })
-const editId = ref<string>('')
+const form = ref({ title: '', description: '' })
+const editId = ref<number | null>(null)
 
 function formatDate(d?: string) {
   if (!d) return '-'
   return new Date(d).toLocaleString()
 }
 async function load() {
-  projects.value = await listProjects()
+  const result = await listSurveys()
+  projects.value = result.list
 }
-function edit(p: any) {
+function edit(project: Survey) {
   editing.value = true
   showDialog.value = true
-  form.value = { title: p.title, description: p.description }
-  editId.value = p._id
+  form.value = { title: project.title, description: project.description || '' }
+  editId.value = project.id
 }
 function close() {
   showDialog.value = false
   editing.value = false
   form.value = { title: '', description: '' }
-  editId.value = ''
+  editId.value = null
 }
 async function save() {
-  if (editing.value) {
-    await updateProject(editId.value, form.value)
+  if (editing.value && editId.value !== null) {
+    await updateSurvey(editId.value, form.value)
   } else {
-    await createProject(form.value)
+    await createSurvey({ ...form.value, questions: [] })
   }
   close()
   await load()
 }
-async function remove(id: string) {
-  await deleteProject(id)
+async function remove(id: number) {
+  await deleteSurvey(id)
   await load()
 }
 onMounted(load)
 </script>
+
 <style scoped>
 .project-page { padding: 16px; }
 .toolbar { margin-bottom: 12px; }

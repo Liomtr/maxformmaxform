@@ -38,7 +38,7 @@ export function toServerPayload(form: SurveyForm) {
     ...form,
     questions: form.questions.map(q => ({
       ...q,
-      type: mapLegacyTypeToServer(q.type),
+      type: mapLegacyTypeToServer(Number(q.type)),
     })),
   }
 }

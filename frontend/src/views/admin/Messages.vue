@@ -19,6 +19,6 @@ import { ref, onMounted } from 'vue'
 import { listMessages, markMessageRead, type MessageDTO } from '@/api/messages'
 const msgs = ref<MessageDTO[]>([])
 const load = async()=>{ msgs.value = await listMessages() }
-const markRead = async(m:MessageDTO)=>{ await markMessageRead(m.id); await load() }
+const markRead = async(m:MessageDTO)=>{ if (m.id == null) return; await markMessageRead(m.id); await load() }
 onMounted(load)
 </script>

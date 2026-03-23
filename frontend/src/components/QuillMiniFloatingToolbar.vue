@@ -77,7 +77,7 @@ const emit = defineEmits<{ (e:'action', type: 'link'|'image'|'video'|'advanced')
 
 const toolbarRef = ref<HTMLElement|null>(null)
 
-const styleObject = computed(() => ({
+const styleObject = computed<Record<string, string | number>>(() => ({
   position: props.fixed ? 'fixed' : 'absolute',
   left: props.x + 'px',
   top: props.y + 'px',

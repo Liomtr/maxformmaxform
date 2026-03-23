@@ -96,9 +96,9 @@
             <div class="editor-utility-bar editor-utility-bar--mirrored" role="toolbar">
               <button
                 type="button"
-                :class="['utility-btn', { 'is-active': currentTab === 'preview' }]"
+                class="utility-btn"
                 aria-label="预览"
-                :aria-pressed="currentTab === 'preview'"
+                :aria-pressed="false"
                 @click.stop="switchEditorTab('preview')"
               >
                 <span class="utility-icon" aria-hidden="true">
@@ -285,13 +285,13 @@
                                     <div
                                       class="option-input-preview"
                                       :data-opt="`q${index}-o${optIndex}`"
-                                      v-html="question.options[optIndex]"
+                                      v-html="(question.options as string[])[optIndex]"
                                     ></div>
                                   </template>
                                   <template v-else>
                                     <input
                                       :data-opt="`q${index}-o${optIndex}`"
-                                      v-model="question.options[optIndex]"
+                                      v-model="(question.options as string[])[optIndex]"
                                       class="option-input"
                                       :placeholder="`选项${optIndex + 1}`"
                                     />
@@ -456,9 +456,9 @@
             <aside class="question-types-panel in-editor">
               <div class="panel-header">
                 <div class="panel-tabs" role="tablist" aria-label="题型面板切换">
-                  <button class="panel-tab" :class="{ active: panelTab === 'types' }" role="tab" aria-selected="panelTab==='types'" @click="panelTab = 'types'">题型</button>
-                  <button class="panel-tab" :class="{ active: panelTab === 'repo' }" role="tab" aria-selected="panelTab==='repo'" @click="panelTab = 'repo'">题库</button>
-                  <button class="panel-tab" :class="{ active: panelTab === 'outline' }" role="tab" aria-selected="panelTab==='outline'" @click="panelTab = 'outline'">大纲</button>
+                  <button class="panel-tab" :class="{ active: panelTab === 'types' }" role="tab" :aria-selected="panelTab==='types'" @click="panelTab = 'types'">题型</button>
+                  <button class="panel-tab" :class="{ active: panelTab === 'repo' }" role="tab" :aria-selected="panelTab==='repo'" @click="panelTab = 'repo'">题库</button>
+                  <button class="panel-tab" :class="{ active: panelTab === 'outline' }" role="tab" :aria-selected="panelTab==='outline'" @click="panelTab = 'outline'">大纲</button>
                 </div>
               </div>
               
@@ -1948,6 +1948,7 @@ function addLogicRow(){
 function removeLogicRow(i:number){ logicRows.splice(i,1) }
 function togglePick(i:number, val:string){
   const arr = logicRows[i].picked
+  if (!arr) return
   const s = String(val)
   const k = arr.indexOf(s)
   if (k>=0) arr.splice(k,1); else arr.push(s)
@@ -2180,7 +2181,7 @@ const currentOptionSummary = computed(() => {
       const picks = (row.picked||[])
       if (!picks.length) continue
       const idxs:number[] = []
-      picks.forEach(lbl => {
+      picks.forEach((lbl:any) => {
         const i = (dep.options||[]).findIndex((t:any)=> String(t)===String(lbl))
         if (i>=0) idxs.push(i+1)
       })
@@ -2435,7 +2436,7 @@ const closeQuestionEdit = () => {
 }
 
 // UI状态
-const currentTab = ref('edit')
+const currentTab = ref<'edit'|'preview'|'settings'|'share'|'answers'>('edit')
 const showAIHelper = ref(false)
 const showHeaderSettings = ref(false)
 const aiPrompt = ref('')
@@ -2467,7 +2468,8 @@ const surveyForm = reactive({
     allowMultipleSubmissions: false,
     showProgress: true,
     randomizeQuestions: false,
-    collectIP: false
+    collectIP: false,
+    submitOnce: true
   },
   questions: [] as Question[]
 })
@@ -2535,7 +2537,7 @@ onMounted(async () => {
   // 根据路由 query 指定初始 Tab
   const initTab = (route.query?.tab as string) || ''
   if (['edit', 'preview', 'answers', 'settings'].includes(initTab)) {
-    currentTab.value = initTab
+    currentTab.value = initTab as 'edit' | 'preview' | 'answers' | 'settings'
   }
   // 如果有路由参数 id，视为编辑已存在问卷：从后端读取并填充
   const editingId = route.params?.id as string | undefined
@@ -2545,6 +2547,16 @@ onMounted(async () => {
       // 基本信息
       surveyForm.title = s.title || ''
       surveyForm.description = s.description || ''
+      surveyForm.settings = {
+        ...surveyForm.settings,
+        ...(s.settings || {}),
+        showProgress: s?.settings?.showProgress !== false,
+        allowMultipleSubmissions: !!s?.settings?.allowMultipleSubmissions,
+        randomizeQuestions: !!(s as any)?.settings?.randomizeQuestions || !!(s as any)?.settings?.randomOrder,
+        collectIP: !!(s as any)?.settings?.collectIP,
+        submitOnce: (s as any)?.settings?.submitOnce !== false
+      }
+      surveyForm.endTime = s?.settings?.endTime || ''
       // 保存真实ID（用于API调用）
       currentSurveyId.value = String(s.id || editingId)
       // 回填 shareId（或以 id 兜底），用于分享链接与二维码
@@ -3013,7 +3025,7 @@ function toggleHidden(q:any, i:number){
 // 答案管理方法已迁移至 SurveyAnswersPanel.vue 组件
 
 // 切换分类展开状态
-const toggleCategory = (category: string) => {
+const toggleCategory = (category: keyof typeof categoryExpanded) => {
   categoryExpanded[category] = !categoryExpanded[category]
 }
 
@@ -3143,7 +3155,12 @@ const toServerPayload = () => {
   return {
     title: surveyForm.title,
     description: surveyForm.description,
-    questions
+    questions,
+    settings: {
+      ...surveyForm.settings,
+      endTime: surveyForm.endTime || '',
+      submitOnce: !surveyForm.settings.allowMultipleSubmissions
+    }
   }
 }
 
@@ -3170,7 +3187,7 @@ function optionSummary(qIndex:number, optIndex:number): string {
       const picks = Array.isArray(c.value) ? c.value : []
       if (!picks.length) continue
       const idxs:number[] = []
-      picks.forEach(lbl => {
+      picks.forEach((lbl:any) => {
         const i = (dep.options||[]).findIndex((t:any)=> String(t)===String(lbl))
         if (i>=0) idxs.push(i+1)
       })
@@ -3226,7 +3243,7 @@ function questionLogicSummary(qIndex:number): string {
       const picks = Array.isArray(c.value) ? c.value : []
       if (!picks.length) continue
       const idxs:number[] = []
-      picks.forEach(lbl => {
+      picks.forEach((lbl:any) => {
         const i = (dep.options||[]).findIndex((t:any)=> String(t)===String(lbl))
         if (i>=0) idxs.push(i+1)
       })
