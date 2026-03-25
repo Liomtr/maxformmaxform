@@ -15,6 +15,7 @@ import userRoutes from './src/routes/users.js'
 import fileRoutes from './src/routes/files.js'
 import deptRoutes from './src/routes/depts.js'
 import roleRoutes from './src/routes/roles.js'
+import positionRoutes from './src/routes/positions.js'
 import folderRoutes from './src/routes/folders.js'
 import messageRoutes from './src/routes/messages.js'
 import auditRoutes from './src/routes/audits.js'
@@ -47,9 +48,9 @@ app.use('/api/users', userRoutes)
 app.use('/api/files', fileRoutes)
 app.use('/api/depts', deptRoutes)
 app.use('/api/roles', roleRoutes)
+app.use('/api/positions', positionRoutes)
 app.use('/api/folders', folderRoutes)
 app.use('/api/messages', messageRoutes)
-app.get('/api/positions', (_req, res) => res.json({ success: true, data: [] }))
 app.use('/api/audits', auditRoutes)
 
 // --- Health check ---

@@ -20,11 +20,23 @@ export interface QuestionOption {
   __remaining?: number | null
 }
 
+export interface UploadQuestionConfig {
+  maxFiles?: number
+  maxSizeMb?: number
+  accept?: string
+}
+
+export interface MatrixQuestionConfig {
+  rows?: QuestionOption[] | string[]
+  selectionType?: 'single' | 'multiple'
+}
+
 export type LegacyQuestionType = number
 
 export interface Question {
   id: string
   type: string | number
+  uiType?: number
   title: string
   titleHtml?: string
   description?: string
@@ -32,6 +44,8 @@ export interface Question {
   options?: QuestionOption[]
   optionOrder?: 'none' | 'all' | 'flip' | 'firstFixed' | 'lastFixed'
   validation?: Record<string, unknown>
+  upload?: UploadQuestionConfig
+  matrix?: MatrixQuestionConfig
   logic?: Record<string, unknown>
   examConfig?: { score?: number; correctAnswer?: unknown }
   jumpLogic?: Record<string, unknown>

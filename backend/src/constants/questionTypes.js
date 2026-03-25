@@ -1,29 +1,24 @@
+import {
+  SERVER_QUESTION_TYPE_LABELS,
+  mapLegacyTypeToServer
+} from '../../../shared/questionTypeRegistry.js'
+
 export const QuestionType = {
-  FillBlank: 'input',
-  ShortAnswer: 'textarea',
-  SingleChoice: 'radio',
-  MultipleChoice: 'checkbox',
+  FillBlank: mapLegacyTypeToServer(1),
+  ShortAnswer: mapLegacyTypeToServer(2),
+  SingleChoice: mapLegacyTypeToServer(3),
+  MultipleChoice: mapLegacyTypeToServer(4),
   Scale: 'scale',
   Matrix: 'matrix',
   Dropdown: 'dropdown',
-  Slider: 'slider',
-  Ranking: 'ranking',
-  FileUpload: 'upload',
-  Date: 'date',
+  Slider: mapLegacyTypeToServer(8),
+  Ranking: mapLegacyTypeToServer(11),
+  FileUpload: mapLegacyTypeToServer(13),
+  Date: mapLegacyTypeToServer(14),
   Rating: 'rating'
 }
 
 export const QuestionTypeLabel = {
-  input: '填空题',
-  textarea: '简答题',
-  radio: '单选题',
-  checkbox: '多选题',
-  scale: '量表题',
-  matrix: '矩阵题',
-  dropdown: '下拉题',
-  slider: '滑动条题',
-  ranking: '排序题',
-  upload: '文件上传题',
-  date: '日期题',
-  rating: '评分题'
+  ...SERVER_QUESTION_TYPE_LABELS,
+  dropdown: '下拉题'
 }

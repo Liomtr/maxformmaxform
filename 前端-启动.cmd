@@ -1,38 +1,70 @@
 @echo off
-setlocal ENABLEDELAYEDEXPANSION
+setlocal
 chcp 65001 >nul
 
 set "ROOT=%~dp0"
-echo [INFO] 项目根目录: %ROOT%
+set "FRONTEND_DIR=%ROOT%frontend"
+set "FRONTEND_PORT=63000"
+set "BACKEND_PORT=63002"
 
-where node >nul 2>nul || ( echo [错误] 未检测到 Node.js，请先安装 Node 18+ & pause & exit /b 1 )
-where npm  >nul 2>nul || ( echo [错误] 未检测到 npm，请确认 Node.js 安装包含 npm & pause & exit /b 1 )
+echo [INFO] Project root: %ROOT%
 
-pushd "%ROOT%frontend" || ( echo [错误] 未找到前端目录 frontend & pause & exit /b 1 )
-echo [INFO] 进入目录: %CD%
+where node >nul 2>nul || (
+  echo [ERROR] Node.js was not found. Please install Node 18+ first.
+  pause
+  exit /b 1
+)
+
+where npm >nul 2>nul || (
+  echo [ERROR] npm was not found. Please check your Node.js installation.
+  pause
+  exit /b 1
+)
+
+if not exist "%FRONTEND_DIR%\package.json" (
+  echo [ERROR] frontend\package.json was not found.
+  pause
+  exit /b 1
+)
+
+pushd "%FRONTEND_DIR%" || (
+  echo [ERROR] Failed to enter frontend directory.
+  pause
+  exit /b 1
+)
 
 if not exist "node_modules\" (
-	echo [INFO] 首次运行，正在安装依赖...
-	call npm install || ( echo [错误] 依赖安装失败，请检查网络或 npm 源 & popd & pause & exit /b 1 )
+  echo [INFO] Installing frontend dependencies...
+  call npm install || (
+    echo [ERROR] npm install failed.
+    popd
+    pause
+    exit /b 1
+  )
 ) else (
-	echo [INFO] 依赖已安装，跳过 npm install
+  echo [INFO] Frontend dependencies already installed.
 )
 
-set PORT_TO_USE=63000
-echo [INFO] 启动开发服务器：端口 !PORT_TO_USE!
-
-call npm run dev -- --port !PORT_TO_USE!
-if errorlevel 1 (
-	echo [WARN] 端口 !PORT_TO_USE! 可能被占用，尝试 63001 ...
-	set PORT_TO_USE=63001
-	call npm run dev -- --port !PORT_TO_USE!
-	if errorlevel 1 (
-		echo [错误] 启动失败，请检查报错信息。
-		popd
-		pause
-		exit /b 1
-	)
+set "BACKEND_PID="
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%BACKEND_PORT% " ^| findstr LISTENING') do set "BACKEND_PID=%%p"
+if not defined BACKEND_PID (
+  echo [WARN] Backend is not listening on http://127.0.0.1:%BACKEND_PORT%
+  echo [WARN] Please start the backend first if login/API calls fail.
+) else (
+  echo [INFO] Backend detected on port %BACKEND_PORT% ^(PID: %BACKEND_PID%^)
 )
+
+echo [INFO] Frontend URL: http://127.0.0.1:%FRONTEND_PORT%
+echo [INFO] API proxy target: http://127.0.0.1:%BACKEND_PORT%
+
+call npm run dev -- --host localhost --port %FRONTEND_PORT%
+set "EXIT_CODE=%ERRORLEVEL%"
 
 popd
+if not "%EXIT_CODE%"=="0" (
+  echo [ERROR] Frontend startup failed.
+  pause
+  exit /b %EXIT_CODE%
+)
+
 pause

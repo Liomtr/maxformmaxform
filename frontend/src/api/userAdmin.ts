@@ -18,7 +18,7 @@ export async function getUser(id: number | string): Promise<User> {
   return data.data!
 }
 
-export async function createUser(payload: { username: string; password: string; email?: string; role_id?: number; dept_id?: number }): Promise<User> {
+export async function createUser(payload: { username: string; password: string; email?: string; role_id?: number; dept_id?: number; position_id?: number | null }): Promise<User> {
   const { data } = await http.post<ApiResponse<User>>('/users', payload)
   return data.data!
 }
@@ -61,8 +61,8 @@ export async function assignDept(id: number | string, dept_id: number | null): P
   await http.put(`/users/${id}`, { dept_id })
 }
 
-export async function assignPosition(_id: number | string, _positionId: number | null): Promise<void> {
-  // Position 已在重构中移除，此为兼容占位
+export async function assignPosition(id: number | string, position_id: number | null): Promise<void> {
+  await http.put(`/users/${id}`, { position_id })
 }
 
 export async function exportUsersCsv(params?: Record<string, unknown>): Promise<Blob> {

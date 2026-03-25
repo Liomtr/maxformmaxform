@@ -49,18 +49,109 @@ export async function submitResponses(id: string | number, answers: unknown[], d
   return data
 }
 
-export async function getResults(id: string | number) {
-  const { data } = await http.get<ApiResponse<{
-    totalSubmissions: number
-    lastSubmitAt: string | null
-    total?: number
-    today?: number
-    avgScore?: number
-    completionRate?: number
-    completed?: number
-    incomplete?: number
-    avgTime?: string | number
-  }>>(`/surveys/${id}/results`)
+export interface UploadedSurveyFile {
+  id: number
+  name: string
+  url: string
+  size: number
+  type: string
+  surveyId: number
+  uploadToken: string
+}
+
+export async function uploadSurveyFile(
+  id: string | number,
+  file: File,
+  options?: { questionId?: number; submissionToken?: string }
+): Promise<UploadedSurveyFile> {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (options?.questionId !== undefined) formData.append('questionId', String(options.questionId))
+  if (options?.submissionToken) formData.append('submissionToken', options.submissionToken)
+  const { data } = await http.post<ApiResponse<UploadedSurveyFile>>(`/surveys/${id}/uploads`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+  return data.data!
+}
+
+export interface SurveyResultOptionStat {
+  label: string
+  value?: string
+  count: number
+  percentage: number
+  avgRank?: number | null
+}
+
+export interface SurveyResultFileStat {
+  id: number
+  name: string
+  url: string
+  type: string
+  size: number
+}
+
+export interface SurveyResultMatrixRowStat {
+  label: string
+  value: string
+  totalAnswers: number
+  options: SurveyResultOptionStat[]
+}
+
+export interface SurveyResultTrendPoint {
+  date: string
+  label: string
+  count: number
+}
+
+export interface SurveyResultRegionStat {
+  hasLocationData: boolean
+  scope?: string
+  missingCount: number
+  items: Array<{ label: string; value: string }>
+  emptyReason: string | null
+}
+
+export interface SurveyQuestionStat {
+  questionId: number
+  questionTitle: string
+  type: string
+  totalAnswers: number
+  options?: SurveyResultOptionStat[]
+  sampleAnswers?: string[]
+  avgValue?: number | null
+  minValue?: number | null
+  maxValue?: number | null
+  totalFiles?: number
+  sampleFiles?: SurveyResultFileStat[]
+  earliestDate?: string | null
+  latestDate?: string | null
+  avgScore?: number | null
+  distribution?: Record<string, number>
+  matrixMode?: string
+  rows?: SurveyResultMatrixRowStat[]
+}
+
+export interface SurveyResults {
+  totalSubmissions: number
+  lastSubmitAt: string | null
+  total: number
+  today: number
+  avgScore?: number
+  completed: number
+  incomplete: number
+  completionRate: number
+  avgDuration: string | null
+  avgTime: number | null
+  submissionTrend?: SurveyResultTrendPoint[]
+  regionStats?: SurveyResultRegionStat
+  systemStats?: Record<string, Array<{ label: string; value: string }>>
+  questionStats: SurveyQuestionStat[]
+}
+
+export async function getResults(id: string | number): Promise<SurveyResults> {
+  const { data } = await http.get<ApiResponse<SurveyResults>>(`/surveys/${id}/results`)
   return data.data!
 }
 

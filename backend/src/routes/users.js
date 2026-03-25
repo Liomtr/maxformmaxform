@@ -40,7 +40,7 @@ router.get('/:id', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { username, email, password, role_id, dept_id } = req.body || {}
+    const { username, email, password, role_id, dept_id, position_id } = req.body || {}
     if (!username || !password) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION', message: 'Username and password are required' } })
     }
@@ -49,7 +49,7 @@ router.post('/', async (req, res, next) => {
       return res.status(409).json({ success: false, error: { code: 'USER_EXISTS', message: 'Username already exists' } })
     }
 
-    const user = await User.create({ username, email, password, role_id, dept_id })
+    const user = await User.create({ username, email, password, role_id, dept_id, position_id })
     await recordAudit({ actor: req.user, action: 'user.create', targetType: 'user', targetId: user.id, detail: `Created user ${user.username}` })
     res.json({ success: true, data: User.toSafe(user) })
   } catch (e) { next(e) }
@@ -76,6 +76,7 @@ router.post('/import', async (req, res, next) => {
       const password = String(row.password || '').trim()
       const role_id = row.role_id !== undefined && row.role_id !== null && row.role_id !== '' ? Number(row.role_id) : undefined
       const dept_id = row.dept_id !== undefined && row.dept_id !== null && row.dept_id !== '' ? Number(row.dept_id) : undefined
+      const position_id = row.position_id !== undefined && row.position_id !== null && row.position_id !== '' ? Number(row.position_id) : undefined
 
       if (!username) {
         result.skipped += 1
@@ -102,7 +103,7 @@ router.post('/import', async (req, res, next) => {
           continue
         }
 
-        await User.create({ username, email, password, role_id, dept_id })
+        await User.create({ username, email, password, role_id, dept_id, position_id })
         result.created += 1
       } catch (error) {
         result.skipped += 1
@@ -136,8 +137,8 @@ router.post('/import', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { email, is_active, dept_id, role_id } = req.body || {}
-    const user = await User.update(req.params.id, { email, is_active, dept_id, role_id })
+    const { email, is_active, dept_id, role_id, position_id } = req.body || {}
+    const user = await User.update(req.params.id, { email, is_active, dept_id, role_id, position_id })
     if (!user) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } })
     }

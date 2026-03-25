@@ -57,8 +57,29 @@
               </div>
             </template>
             <div class="q-desc" v-if="q.description" v-html="safeHtml(q.description)"></div>
+            <!-- 段落说明 -->
+            <template v-if="getRenderType(q) === 'stage_explain'">
+              <div class="stage-explain-block">
+                <div class="stage-explain-text" v-html="safeHtml((q as any).titleHtml || q.title || '')"></div>
+              </div>
+            </template>
+            <!-- 下拉题 -->
+            <template v-else-if="getRenderType(q) === 'dropdown'">
+              <el-select v-model="form[q.id ?? (idx+1)]" placeholder="请选择" style="width: 320px; max-width: 100%;">
+                <el-option
+                  v-for="opt in filteredOptions(q, idx).filter((item: any) => item.value != null)"
+                  :key="'s-'+String(opt.value)"
+                  :label="String(opt.label || '')"
+                  :value="opt.value"
+                  :disabled="q.quotasEnabled && q.quotaMode==='explicit' && opt.__quotaFull"
+                />
+              </el-select>
+              <template v-for="opt in filteredOptions(q, idx)" :key="'sd-'+(opt.value ?? 'h')">
+                <div v-if="opt.value!=null && opt.desc" style="color:#64748b; font-size:12px; margin:6px 0 0;" v-html="opt.desc"></div>
+              </template>
+            </template>
             <!-- 单选题 -->
-            <template v-if="q.type === 'radio'">
+            <template v-else-if="q.type === 'radio'">
               <el-radio-group v-model="form[q.id ?? (idx+1)]" class="opt-vertical">
                 <template v-for="(opt, oi) in filteredOptions(q, idx)" :key="'r-'+(opt.value ?? 'h-'+oi)">
                   <div v-if="opt.__groupHeader" class="group-header">{{ opt.__groupHeader }}</div>
@@ -121,6 +142,137 @@
                 <div v-if="opt.value!=null && opt.desc" style="color:#64748b; font-size:12px; margin:2px 0 6px 28px;" v-html="opt.desc"></div>
               </template>
             </template>
+            <!-- 排序题 -->
+            <template v-else-if="q.type === 'ranking'">
+              <div class="ranking-answer">
+                <div
+                  v-for="(opt, orderIndex) in getRankingItems(q, idx)"
+                  :key="'rk-'+String(opt.value)"
+                  class="ranking-item"
+                >
+                  <div class="ranking-item-main">
+                    <span class="ranking-order">{{ orderIndex + 1 }}</span>
+                    <span v-if="!opt.rich" class="ranking-label">{{ opt.label }}</span>
+                    <span v-else class="ranking-label" v-html="opt.label"></span>
+                  </div>
+                  <div class="ranking-actions">
+                    <button type="button" class="ranking-btn" :disabled="orderIndex === 0" @click="moveRankingItem(q, idx, orderIndex, -1)">上移</button>
+                    <button type="button" class="ranking-btn" :disabled="orderIndex === getRankingItems(q, idx).length - 1" @click="moveRankingItem(q, idx, orderIndex, 1)">下移</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <!-- 文件上传题 -->
+            <template v-else-if="q.type === 'upload'">
+              <div class="upload-answer">
+                <label class="upload-picker" :class="{ disabled: uploadState[String(q.id ?? (idx+1))] || preview || isUploadLimitReached(q, idx) }">
+                  <input
+                    type="file"
+                    :multiple="getUploadConfig(q).maxFiles > 1"
+                    :accept="getUploadConfig(q).accept"
+                    :disabled="uploadState[String(q.id ?? (idx+1))] || preview || isUploadLimitReached(q, idx)"
+                    @change="onUploadFilesSelected(q, idx, $event)"
+                  />
+                  <span>{{ uploadState[String(q.id ?? (idx+1))] ? '上传中...' : getUploadButtonText(q, idx) }}</span>
+                </label>
+                <div class="upload-tip">{{ getUploadHelpText(q) }}</div>
+                <div v-if="uploadErrors[String(q.id ?? (idx+1))]" class="upload-error">{{ uploadErrors[String(q.id ?? (idx+1))] }}</div>
+                <div v-if="getUploadAnswerList(q, idx).length" class="upload-list">
+                  <div v-for="(file, fileIndex) in getUploadAnswerList(q, idx)" :key="'up-'+file.id+'-'+fileIndex" class="upload-item">
+                    <a class="upload-link" :href="file.url" target="_blank" rel="noopener noreferrer">{{ file.name }}</a>
+                    <button v-if="!preview" type="button" class="upload-remove" @click="removeUploadedFile(q, idx, fileIndex)">移除</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <!-- 日期题 -->
+            <template v-else-if="q.type === 'date'">
+              <input
+                v-model="form[q.id ?? (idx+1)]"
+                class="native-date-input"
+                type="date"
+              />
+            </template>
+            <!-- 滑动条题 -->
+            <template v-else-if="q.type === 'slider'">
+              <div class="slider-answer">
+                <el-slider
+                  v-model="form[q.id ?? (idx+1)]"
+                  :min="getSliderMin(q)"
+                  :max="getSliderMax(q)"
+                  :step="getSliderStep(q)"
+                  show-input
+                />
+                <div class="slider-answer-meta">
+                  <span>{{ getSliderMin(q) }}</span>
+                  <span v-if="form[q.id ?? (idx+1)] != null">当前：{{ form[q.id ?? (idx+1)] }}</span>
+                  <span>{{ getSliderMax(q) }}</span>
+                </div>
+              </div>
+            </template>
+            <template v-else-if="q.type === 'rating'">
+              <div class="rating-answer">
+                <el-rate
+                  :model-value="Number(form[q.id ?? (idx+1)] || 0)"
+                  :max="getRatingMax(q)"
+                  @update:modelValue="onRatingChange(q, idx, $event)"
+                />
+                <div class="rating-answer-meta">评分范围：{{ getRatingMin(q) }} - {{ getRatingMax(q) }} 星</div>
+              </div>
+            </template>
+            <template v-else-if="q.type === 'scale'">
+              <div class="scale-answer">
+                <div class="scale-labels">
+                  <span>{{ getScaleMinLabel(q) }}</span>
+                  <span>{{ getScaleMaxLabel(q) }}</span>
+                </div>
+                <div class="scale-options">
+                  <button
+                    v-for="value in getScaleValues(q)"
+                    :key="`scale-${q.id ?? (idx+1)}-${value}`"
+                    type="button"
+                    :class="['scale-option', { active: Number(form[q.id ?? (idx+1)]) === value }]"
+                    @click="form[q.id ?? (idx+1)] = value"
+                  >
+                    {{ value }}
+                  </button>
+                </div>
+              </div>
+            </template>
+            <template v-else-if="q.type === 'matrix'">
+              <div class="matrix-answer">
+                <div class="matrix-answer-table">
+                  <div class="matrix-answer-row matrix-answer-row--head">
+                    <span class="matrix-answer-cell matrix-answer-cell--row">维度</span>
+                    <span
+                      v-for="column in getMatrixColumns(q, idx)"
+                      :key="`matrix-head-${column.value}`"
+                      class="matrix-answer-cell"
+                    >
+                      {{ column.label }}
+                    </span>
+                  </div>
+                  <div
+                    v-for="row in getMatrixRows(q)"
+                    :key="`matrix-row-${row.value}`"
+                    class="matrix-answer-row"
+                  >
+                    <span class="matrix-answer-cell matrix-answer-cell--row">{{ row.label }}</span>
+                    <span
+                      v-for="column in getMatrixColumns(q, idx)"
+                      :key="`matrix-cell-${row.value}-${column.value}`"
+                      class="matrix-answer-cell"
+                    >
+                      <el-radio
+                        :model-value="getMatrixAnswerValue(q, idx, row.value)"
+                        :label="String(column.value)"
+                        @change="onMatrixSingleChange(q, idx, row.value, column.value)"
+                      />
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </template>
             <!-- 多行文本 -->
             <template v-else-if="q.type === 'textarea'">
               <el-input v-model="form[q.id ?? (idx+1)]" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="请输入" />
@@ -151,8 +303,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getSurvey, getSurveyByShareCode, submitResponses } from '@/api/surveys'
+import { getSurvey, getSurveyByShareCode, submitResponses, uploadSurveyFile, type UploadedSurveyFile } from '@/api/surveys'
 import type { Survey } from '@/types/survey'
+import { getQuestionRenderType } from '@/utils/questionTypeRegistry'
+import { buildUploadQuestionHelpText, clearUploadSubmissionToken, getUploadSubmissionToken, normalizeUploadQuestionConfig, validateSelectedUploadFiles } from '@/utils/uploadQuestion'
 type SurveyDTO = Survey
 import type { FormInstance, FormRules } from 'element-plus'
 import { applyVisibility } from '@/utils/visibility'
@@ -181,6 +335,12 @@ const currentUrl = ref('')
 const qrCanvasRef = ref<HTMLCanvasElement>()
 // 标记哪些题已经应用过“默认选中”（defaultSelected），避免用户取消后再次自动选中
 const defaultApplied = ref<Record<string, boolean>>({})
+const uploadState = ref<Record<string, boolean>>({})
+const uploadErrors = ref<Record<string, string>>({})
+const submissionToken = computed(() => {
+  const key = String(route.params.id || survey.value?.shareId || survey.value?.id || 'preview')
+  return getUploadSubmissionToken(key)
+})
 
 // 已取消填写页题型图标展示（按需求隐藏）
 
@@ -202,7 +362,9 @@ const answeredVisibleQuestions = computed(() => {
     const value = form.value[key]
     const answered = Array.isArray(value)
       ? value.length > 0
-      : value !== undefined && value !== null && String(value).trim() !== ''
+      : (value && typeof value === 'object'
+        ? Object.keys(value).length > 0
+        : value !== undefined && value !== null && String(value).trim() !== '')
 
     return count + (answered ? 1 : 0)
   }, 0)
@@ -211,6 +373,226 @@ const progressPercent = computed(() => {
   if (!totalVisibleQuestions.value) return 0
   return Math.min(100, Math.round((answeredVisibleQuestions.value / totalVisibleQuestions.value) * 100))
 })
+
+function getRenderType(q: any): string {
+  return getQuestionRenderType(q)
+}
+
+function getSliderMin(q: any): number {
+  const value = Number(q?.validation?.min)
+  return Number.isFinite(value) ? value : 0
+}
+
+function getSliderMax(q: any): number {
+  const value = Number(q?.validation?.max)
+  return Number.isFinite(value) ? value : 100
+}
+
+function getSliderStep(q: any): number {
+  const value = Number(q?.validation?.step)
+  return Number.isFinite(value) && value > 0 ? value : 1
+}
+
+function getRatingMin(q: any): number {
+  const value = Number(q?.validation?.min)
+  return Number.isFinite(value) && value > 0 ? value : 1
+}
+
+function getRatingMax(q: any): number {
+  const value = Number(q?.validation?.max)
+  return Number.isFinite(value) && value >= getRatingMin(q) ? value : 5
+}
+
+function onRatingChange(q: any, idx: number, value: number) {
+  const key = String(q.id ?? (idx + 1))
+  form.value[key] = value
+}
+
+function getScaleMin(q: any): number {
+  const value = Number(q?.validation?.min)
+  return Number.isFinite(value) ? value : 0
+}
+
+function getScaleMax(q: any): number {
+  const value = Number(q?.validation?.max)
+  return Number.isFinite(value) && value >= getScaleMin(q) ? value : 10
+}
+
+function getScaleStep(q: any): number {
+  const value = Number(q?.validation?.step)
+  return Number.isFinite(value) && value > 0 ? value : 1
+}
+
+function getScaleMinLabel(q: any): string {
+  return String(q?.validation?.minLabel || '最低')
+}
+
+function getScaleMaxLabel(q: any): string {
+  return String(q?.validation?.maxLabel || '最高')
+}
+
+function getScaleValues(q: any): number[] {
+  const values: number[] = []
+  for (let value = getScaleMin(q); value <= getScaleMax(q); value += getScaleStep(q)) {
+    values.push(value)
+  }
+  return values
+}
+
+function getMatrixRows(q: any) {
+  const rows = Array.isArray(q?.matrix?.rows) ? q.matrix.rows : []
+  return rows.map((row: any, index: number) => {
+    if (row && typeof row === 'object') {
+      return {
+        label: String(row.label ?? row.text ?? `维度${index + 1}`),
+        value: String(row.value ?? index + 1)
+      }
+    }
+    return {
+      label: String(row ?? `维度${index + 1}`),
+      value: String(index + 1)
+    }
+  })
+}
+
+function getMatrixColumns(q: any, idx: number) {
+  return (filteredOptions(q, idx) || []).filter((item: any) => item.value != null)
+}
+
+function getMatrixAnswerValue(q: any, idx: number, rowValue: string) {
+  const key = String(q.id ?? (idx + 1))
+  const answer = form.value[key]
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return ''
+  return String(answer[rowValue] ?? '')
+}
+
+function onMatrixSingleChange(q: any, idx: number, rowValue: string, columnValue: string) {
+  const key = String(q.id ?? (idx + 1))
+  const current = form.value[key]
+  const next = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {}
+  next[String(rowValue)] = String(columnValue)
+  form.value[key] = next
+}
+
+function isMatrixAnswerComplete(q: any, idx: number) {
+  const rows = getMatrixRows(q)
+  if (rows.length === 0) return false
+  return rows.every((row: { value: string }) => getMatrixAnswerValue(q, idx, row.value) !== '')
+}
+
+function getEmptyAnswerValue(q: any) {
+  if (q?.type === 'checkbox' || q?.type === 'ranking' || q?.type === 'upload') return []
+  if (q?.type === 'matrix') return {}
+  if (q?.type === 'slider') return null
+  return ''
+}
+
+function getUploadAnswerList(q: any, idx: number): UploadedSurveyFile[] {
+  const key = String(q.id ?? (idx + 1))
+  return Array.isArray(form.value[key]) ? form.value[key] : []
+}
+
+function getUploadConfig(q: any) {
+  return normalizeUploadQuestionConfig(q)
+}
+
+function getUploadHelpText(q: any) {
+  return buildUploadQuestionHelpText(q)
+}
+
+function isUploadLimitReached(q: any, idx: number) {
+  return getUploadAnswerList(q, idx).length >= getUploadConfig(q).maxFiles
+}
+
+function getUploadButtonText(q: any, idx: number) {
+  if (preview) return '预览模式不可上传'
+  if (isUploadLimitReached(q, idx)) return '已达到上传上限'
+  return '选择文件'
+}
+
+function removeUploadedFile(q: any, idx: number, fileIndex: number) {
+  const key = String(q.id ?? (idx + 1))
+  const next = [...getUploadAnswerList(q, idx)]
+  next.splice(fileIndex, 1)
+  form.value[key] = next
+}
+
+async function onUploadFilesSelected(q: any, idx: number, event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const files = Array.from(input?.files || [])
+  if (input) input.value = ''
+  if (!files.length) return
+
+  const key = String(q.id ?? (idx + 1))
+  if (preview) {
+    uploadErrors.value[key] = '预览模式不上传文件'
+    return
+  }
+
+  const selectionError = validateSelectedUploadFiles(q, getUploadAnswerList(q, idx).length, files)
+  if (selectionError) {
+    uploadErrors.value[key] = selectionError
+    return
+  }
+
+  uploadErrors.value[key] = ''
+  uploadState.value[key] = true
+
+  try {
+    const surveyId = String(route.params.id || survey.value?.shareId || survey.value?.id || '')
+    if (!surveyId) throw new Error('缺少问卷标识，无法上传文件')
+    const uploaded = [...getUploadAnswerList(q, idx)]
+    for (const file of files) {
+      const saved = await uploadSurveyFile(surveyId, file, {
+        questionId: idx + 1,
+        submissionToken: submissionToken.value
+      })
+      uploaded.push(saved)
+    }
+    form.value[key] = uploaded
+  } catch (e: any) {
+    uploadErrors.value[key] = e?.response?.data?.error?.message || e?.message || '文件上传失败'
+  } finally {
+    uploadState.value[key] = false
+  }
+}
+
+function syncRankingAnswer(q: any, idx: number) {
+  if (q?.type !== 'ranking') return
+  const key = String(q.id ?? (idx + 1))
+  const visible = (filteredOptions(q, idx) || []).filter((opt: any) => opt?.value != null)
+  const visibleValues = visible.map((opt: any) => String(opt.value))
+  const current = Array.isArray(form.value[key]) ? form.value[key].map(String) : []
+  const next = current.filter((value: string) => visibleValues.includes(value))
+  visibleValues.forEach((value: string) => {
+    if (!next.includes(value)) next.push(value)
+  })
+  form.value[key] = next
+}
+
+function getRankingItems(q: any, idx: number) {
+  const key = String(q.id ?? (idx + 1))
+  const visible = (filteredOptions(q, idx) || []).filter((opt: any) => opt?.value != null)
+  const order = Array.isArray(form.value[key]) ? form.value[key].map(String) : []
+  const byValue = new Map(visible.map((opt: any) => [String(opt.value), opt]))
+  const ordered = order.map((value: string) => byValue.get(value)).filter(Boolean)
+  visible.forEach((opt: any) => {
+    if (!order.includes(String(opt.value))) ordered.push(opt)
+  })
+  return ordered
+}
+
+function moveRankingItem(q: any, idx: number, itemIndex: number, direction: -1 | 1) {
+  const key = String(q.id ?? (idx + 1))
+  syncRankingAnswer(q, idx)
+  const current = Array.isArray(form.value[key]) ? [...form.value[key].map(String)] : []
+  const targetIndex = itemIndex + direction
+  if (itemIndex < 0 || targetIndex < 0 || targetIndex >= current.length) return
+  const [moved] = current.splice(itemIndex, 1)
+  current.splice(targetIndex, 0, moved)
+  form.value[key] = current
+}
+
 function randShuffle<T>(arr: T[]): T[] {
   const a = [...arr]
   for (let i=a.length-1;i>0;i--){
@@ -459,8 +841,7 @@ onMounted(async () => {
     const nextRules: FormRules = {}
     survey.value.questions.forEach((q: any, index: number) => {
       const key = String(q.id ?? (index + 1))
-      if (q.type === 'checkbox') form.value[key] = []
-      else form.value[key] = ''
+      form.value[key] = getEmptyAnswerValue(q)
       const makeFillRule = (msg:string) => [{ required: true, message: msg, trigger: ['blur','change'] }]
       const opts:any[] = Array.isArray(q.options) ? q.options : []
       opts.forEach((raw:any, i:number) => {
@@ -472,8 +853,22 @@ onMounted(async () => {
         }
       })
       if (q.required) {
-        if (q.type === 'checkbox') nextRules[key] = [{ type: 'array', required: true, message: '此题为必选', trigger: 'change' }]
-        else nextRules[key] = [{ required: true, message: '此题为必填', trigger: ['blur','change'] }]
+        if (q.type === 'checkbox' || q.type === 'ranking' || q.type === 'upload') {
+          nextRules[key] = [{ type: 'array', required: true, message: '此题为必选', trigger: 'change' }]
+        } else if (q.type === 'matrix') {
+          nextRules[key] = [{
+            validator: (_rule: any, value: any, callback: (error?: Error) => void) => {
+              if (value && typeof value === 'object' && !Array.isArray(value) && isMatrixAnswerComplete(q, index)) {
+                callback()
+                return
+              }
+              callback(new Error('请完成矩阵题每一行的选择'))
+            },
+            trigger: 'change'
+          }]
+        } else {
+          nextRules[key] = [{ required: true, message: '此题为必填', trigger: ['blur','change'] }]
+        }
       }
     })
     rules.value = nextRules
@@ -481,6 +876,7 @@ onMounted(async () => {
     survey.value.questions.forEach((q:any, i:number) => { const key = String(q.id ?? (i+1)); answers[i+1] = form.value[key] })
     const vis = applyVisibility((survey.value.questions||[]).map((q:any, i:number)=>({ id: i+1, required: q.required, title: q.title, logic: q.logic })), answers)
     visibleMap.value = Object.fromEntries(Object.entries(vis).map(([k,v])=>[String(k), v as boolean]))
+    survey.value.questions.forEach((q:any, i:number)=>{ if (q.type === 'ranking') syncRankingAnswer(q, i) })
     survey.value.questions.forEach((q:any, i:number)=>{ const order=i+1; if (visibleMap.value[String(order)] !== false) applyDefaultIfNeeded(q,i) })
   } catch (e:any) {
     if (!props.injectedSurvey){
@@ -559,10 +955,12 @@ watch(form, () => {
       // 构造最小 payload（无需答案内容）
       const shareId = String(route.params.id || '')
       try {
-        const res = await submitResponses(shareId, [], { invalid: true })
+        const res = await submitResponses(shareId, [], { invalid: true, clientSubmissionToken: submissionToken.value })
+        clearUploadSubmissionToken(String(route.params.id || survey.value?.shareId || survey.value?.id || 'preview'))
         // 无论后端是否严格校验，前端直接显示“提交成功（无效）”并跳转
         router.push({ name: 'SurveySuccess', params: { id: shareId }, query: { message: '感谢作答，本问卷不符合条件，已标记为无效提交。', title: survey.value?.title } })
       } catch (e) {
+        clearUploadSubmissionToken(String(route.params.id || survey.value?.shareId || survey.value?.id || 'preview'))
         // 出错时也跳转但提示不同
         router.push({ name: 'SurveySuccess', params: { id: shareId }, query: { message: '您不符合本次问卷条件，已结束作答。', title: survey.value?.title } })
       }
@@ -582,8 +980,7 @@ watch(form, () => {
       const order = i + 1
       const key = String(q.id ?? order)
       if (vis[order] === false) {
-        if (q.type === 'checkbox') form.value[key] = []
-        else form.value[key] = ''
+        form.value[key] = getEmptyAnswerValue(q)
       } else {
         // 题目可见时，若选项级可见性变化导致当前值无效，需同步清理
         if (q.type === 'radio' || q.type === 'checkbox') {
@@ -612,6 +1009,19 @@ watch(form, () => {
               }
             }
             }
+          }
+        } else if (q.type === 'ranking') {
+          syncRankingAnswer(q, i)
+        } else if (q.type === 'matrix') {
+          const allowed = new Set((filteredOptions(q, i) || []).map((opt: any) => String(opt.value)))
+          const current = form.value[key]
+          if (current && typeof current === 'object' && !Array.isArray(current)) {
+            const next = Object.fromEntries(
+              Object.entries(current)
+                .map(([rowKey, value]) => [String(rowKey), String(value ?? '')])
+                .filter(([, value]) => value === '' || allowed.has(value))
+            )
+            form.value[key] = next
           }
         }
       }
@@ -644,8 +1054,9 @@ const handleSubmit = async () => {
       const key = String(q.id ?? (index + 1))
       return { questionId: Number(q.id ?? (index + 1)), value: form.value[key] }
     })
-    const res = await submitResponses(shareId, payload)
+    const res = await submitResponses(shareId, payload, { clientSubmissionToken: submissionToken.value })
     if (res?.success) {
+      clearUploadSubmissionToken(String(route.params.id || survey.value?.shareId || survey.value?.id || 'preview'))
       // 跳转到成功页面
       router.push({
         name: 'SurveySuccess',
@@ -1031,6 +1442,269 @@ function safeHtml(raw:string){
   color: var(--quota-remaining-color, #64748b); /* 默认柔和蓝灰色 */
   font-size: 12px;
   margin-left: 6px;
+}
+
+.stage-explain-block {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+}
+
+.stage-explain-text {
+  line-height: 1.7;
+}
+
+.native-date-input {
+  width: min(320px, 100%);
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #111827;
+  background: #fff;
+}
+
+.slider-answer {
+  width: min(420px, 100%);
+  padding: 8px 4px 4px;
+}
+
+.slider-answer-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.rating-answer,
+.scale-answer,
+.matrix-answer {
+  width: min(640px, 100%);
+}
+
+.rating-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rating-answer-meta {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.scale-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scale-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scale-option {
+  min-width: 40px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+
+.scale-option.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.matrix-answer {
+  overflow-x: auto;
+}
+
+.matrix-answer-table {
+  min-width: 420px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.matrix-answer-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) repeat(auto-fit, minmax(72px, 1fr));
+  align-items: center;
+}
+
+.matrix-answer-row--head {
+  background: #f8fafc;
+  font-weight: 600;
+}
+
+.matrix-answer-cell {
+  padding: 12px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  border-right: 1px solid #e5e7eb;
+  text-align: center;
+}
+
+.matrix-answer-cell--row {
+  text-align: left;
+  color: #1f2937;
+}
+
+.matrix-answer-row:last-child .matrix-answer-cell {
+  border-bottom: none;
+}
+
+.matrix-answer-cell:last-child {
+  border-right: none;
+}
+
+.ranking-answer {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ranking-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.ranking-item-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ranking-order {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.ranking-label {
+  color: #111827;
+  line-height: 1.5;
+}
+
+.ranking-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.ranking-btn {
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  color: #374151;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.ranking-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.upload-answer {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.upload-picker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-width: 132px;
+  padding: 10px 16px;
+  border: 1px dashed #94a3b8;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-picker.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.upload-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.upload-tip {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.upload-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.upload-link {
+  color: #2563eb;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.upload-remove {
+  border: 0;
+  background: transparent;
+  color: #dc2626;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.upload-error {
+  color: #dc2626;
+  font-size: 12px;
 }
 
 
