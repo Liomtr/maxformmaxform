@@ -13,8 +13,6 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.1.0",
-    "@types/qrcode": "^1.5.5",
-    "@types/quill": "^2.0.14",
     "@wangeditor/editor": "^5.1.23",
     "@wangeditor/editor-for-vue": "^5.1.12",
     "axios": "^1.4.0",
@@ -29,6 +27,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.4.5",
+    "@types/qrcode": "^1.5.5",
+    "@types/quill": "^2.0.14",
     "@vitejs/plugin-vue": "^4.2.3",
     "@vue/eslint-config-typescript": "^11.0.3",
     "@vue/tsconfig": "^0.4.0",
