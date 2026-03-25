@@ -1,5 +1,6 @@
 import { computed } from 'vue'
 import type { Survey } from '@/types/survey'
+import { mapLegacyTypeToServer } from '@/utils/questionTypeRegistry'
 
 export interface LegacyQuestionDraft {
   id: string | number
@@ -8,6 +9,9 @@ export interface LegacyQuestionDraft {
   description?: string
   required?: boolean
   options?: any[]
+  validation?: Record<string, unknown>
+  upload?: Record<string, unknown>
+  matrix?: { rows?: any[]; selectionType?: string }
   logic?: any
   jumpLogic?: any
   optionGroups?: any[]
@@ -17,18 +21,6 @@ export interface LegacyQuestionDraft {
 }
 
 export function usePreviewSurveyMapping(surveyForm: { title:string; description:string; questions: LegacyQuestionDraft[] }) {
-  const mapLegacyToServer = (n:number):string => {
-    switch(n){
-      case 1: return 'input'
-      case 2: return 'textarea'
-      case 3: return 'radio'
-      case 4: return 'checkbox'
-      case 11: return 'ranking'
-      case 13: return 'upload'
-      case 14: return 'date'
-      default: return 'input'
-    }
-  }
   const mappedSurveyForPreview = computed<Survey>(() => ({
     id: 0,
     title: surveyForm.title,
@@ -43,13 +35,28 @@ export function usePreviewSurveyMapping(surveyForm: { title:string; description:
     updated_at: '',
     questions: (surveyForm.questions||[]).map((q:any, i:number)=>({
       id: q.id || (i+1),
+      uiType: Number(q.uiType ?? q.type),
       title: q.title,
       titleHtml: (q as any).titleHtml || (q as any).__titleHtml || undefined,
       description: q.description,
-      type: mapLegacyToServer(q.type),
+      type: mapLegacyTypeToServer(q.type),
       required: !!q.required,
       hideSystemNumber: !!(q as any).hideSystemNumber,
       options: Array.isArray(q.options)? q.options.map((o:any)=> typeof o==='string'? o : o):[],
+      validation: (q as any).validation || undefined,
+      upload: (q as any).upload || undefined,
+      matrix: (q as any).matrix
+        ? {
+            ...(q as any).matrix,
+            rows: Array.isArray((q as any).matrix.rows)
+              ? (q as any).matrix.rows.map((row: any, index: number) => ({
+                  label: typeof row === 'string' ? row : String(row?.label ?? row?.text ?? `维度${index + 1}`),
+                  value: String(index + 1),
+                  order: index + 1
+                }))
+              : []
+          }
+        : undefined,
       logic: (q as any).logic || null,
       jumpLogic: (q as any).jumpLogic || null,
       optionGroups: (q as any).optionGroups || [],

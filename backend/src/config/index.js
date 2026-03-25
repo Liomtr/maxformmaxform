@@ -19,6 +19,7 @@ const config = {
 
   upload: {
     maxSize: 10 * 1024 * 1024,
+    pendingTtlHours: Number(process.env.UPLOAD_PENDING_TTL_HOURS || 24),
     allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document']

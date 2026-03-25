@@ -21,7 +21,7 @@ async function ensureAdmin() {
       throw new Error('Admin role not found after seed')
     }
 
-    const password = process.env.ADMIN_INIT_PASSWORD || 'admin123'
+    const password = process.env.ADMIN_INIT_PASSWORD || '123456'
     const email = process.env.ADMIN_INIT_EMAIL || 'admin@example.com'
     const user = await User.create({
       username: 'admin',

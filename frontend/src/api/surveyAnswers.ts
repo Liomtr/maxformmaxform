@@ -25,3 +25,8 @@ export async function downloadSurveyExcel(survey_id: string | number): Promise<B
   const res = await http.post('/answers/download/survey', { survey_id }, { responseType: 'blob' })
   return res.data as Blob
 }
+
+export async function downloadSurveyAttachmentsZip(survey_id: string | number): Promise<Blob> {
+  const res = await http.post('/answers/download/attachments', { survey_id }, { responseType: 'blob' })
+  return res.data as Blob
+}

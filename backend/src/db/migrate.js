@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs'
 import knex from './knex.js'
 
 export async function migrate() {
@@ -23,6 +24,19 @@ export async function migrate() {
     })
   }
 
+  if (!await knex.schema.hasTable('positions')) {
+    await knex.schema.createTable('positions', t => {
+      t.increments('id').unsigned()
+      t.string('name', 100).notNullable()
+      t.string('code', 50).nullable().unique()
+      t.boolean('is_virtual').notNullable().defaultTo(false)
+      t.string('remark', 255).nullable()
+      t.datetime('created_at').defaultTo(knex.fn.now())
+      t.datetime('updated_at').defaultTo(knex.fn.now())
+      t.index('name')
+    })
+  }
+
   if (!await knex.schema.hasTable('users')) {
     await knex.schema.createTable('users', t => {
       t.increments('id').unsigned()
@@ -31,6 +45,7 @@ export async function migrate() {
       t.string('email', 255).nullable()
       t.integer('role_id').unsigned().nullable()
       t.integer('dept_id').unsigned().nullable()
+      t.integer('position_id').unsigned().nullable()
       t.string('avatar', 500).nullable()
       t.boolean('is_active').defaultTo(true)
       t.datetime('last_login_at').nullable()
@@ -38,6 +53,7 @@ export async function migrate() {
       t.datetime('updated_at').defaultTo(knex.fn.now())
       t.index('role_id')
       t.index('dept_id')
+      t.index('position_id')
     })
   }
 
@@ -83,8 +99,18 @@ export async function migrate() {
       t.integer('size').unsigned().defaultTo(0)
       t.string('type', 50).nullable()
       t.integer('uploader_id').unsigned().nullable()
+      t.integer('survey_id').unsigned().nullable()
+      t.integer('question_order').unsigned().nullable()
+      t.string('submission_token', 80).nullable()
+      t.integer('answer_id').unsigned().nullable()
+      t.string('public_token', 80).nullable()
       t.datetime('created_at').defaultTo(knex.fn.now())
       t.index('uploader_id')
+      t.index('survey_id')
+      t.index('question_order')
+      t.index('submission_token')
+      t.index('answer_id')
+      t.index('public_token')
     })
   }
 
@@ -159,16 +185,84 @@ export async function migrate() {
     }
   }
 
+  if (await knex.schema.hasTable('users')) {
+    if (!await knex.schema.hasColumn('users', 'position_id')) {
+      await knex.schema.alterTable('users', t => {
+        t.integer('position_id').unsigned().nullable().index()
+      })
+    }
+  }
+
+  if (await knex.schema.hasTable('files')) {
+    if (!await knex.schema.hasColumn('files', 'survey_id')) {
+      await knex.schema.alterTable('files', t => {
+        t.integer('survey_id').unsigned().nullable().index()
+      })
+    }
+    if (!await knex.schema.hasColumn('files', 'public_token')) {
+      await knex.schema.alterTable('files', t => {
+        t.string('public_token', 80).nullable().index()
+      })
+    }
+    if (!await knex.schema.hasColumn('files', 'question_order')) {
+      await knex.schema.alterTable('files', t => {
+        t.integer('question_order').unsigned().nullable().index()
+      })
+    }
+    if (!await knex.schema.hasColumn('files', 'submission_token')) {
+      await knex.schema.alterTable('files', t => {
+        t.string('submission_token', 80).nullable().index()
+      })
+    }
+    if (!await knex.schema.hasColumn('files', 'answer_id')) {
+      await knex.schema.alterTable('files', t => {
+        t.integer('answer_id').unsigned().nullable().index()
+      })
+    }
+  }
+
   console.log('Database schema ensured')
 }
 
 export async function seed() {
-  const adminRole = await knex('roles').where('code', 'admin').first()
+  let adminRole = await knex('roles').where('code', 'admin').first()
   if (!adminRole) {
     await knex('roles').insert([
       { name: '管理员', code: 'admin', permissions: JSON.stringify(['*']) },
       { name: '普通用户', code: 'user', permissions: JSON.stringify(['survey:create', 'survey:edit', 'survey:view', 'answer:view']) }
     ])
     console.log('Default roles seeded')
+    adminRole = await knex('roles').where('code', 'admin').first()
   }
+
+  const userRole = await knex('roles').where('code', 'user').first()
+  const passwordHash = await bcrypt.hash('123456', 10)
+  const accounts = [
+    { username: 'admin', email: 'admin@example.com', role_id: adminRole?.id },
+    { username: 'test1', email: 'test1@example.com', role_id: userRole?.id }
+  ]
+
+  for (const account of accounts) {
+    const existing = await knex('users').where('username', account.username).first()
+    const payload = {
+      email: account.email,
+      role_id: account.role_id,
+      password: passwordHash,
+      is_active: true,
+      updated_at: knex.fn.now()
+    }
+
+    if (existing) {
+      await knex('users').where('id', existing.id).update(payload)
+      continue
+    }
+
+    await knex('users').insert({
+      username: account.username,
+      ...payload,
+      created_at: knex.fn.now()
+    })
+  }
+
+  console.log('Default test users ensured')
 }

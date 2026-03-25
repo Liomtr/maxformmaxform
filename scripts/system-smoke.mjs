@@ -34,23 +34,56 @@ const baseUrl = `http://127.0.0.1:${env.PORT}`
 const runId = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
 const adminUsername = `sys_admin_${runId}`
 const adminPassword = `Admin!${runId}`
-const testUser = `sys_user_${runId}`
-const importedUser = `sys_import_${runId}`
+const basicUsername = `sys_user_${runId}`
+const importedUsername = `sys_import_${runId}`
+const positionCode = `smoke-pos-${runId}`
+const updatedPositionCode = `${positionCode}-v2`
 const results = []
+
+const SAFARI_IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+const CHROME_WINDOWS_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
 
 function record(name, ok, detail = {}) {
   results.push({ name, ok, ...detail })
 }
 
-async function api(pathname, { method = 'GET', token, body, expectedStatus } = {}) {
+function isFormDataBody(body) {
+  return typeof FormData !== 'undefined' && body instanceof FormData
+}
+
+async function request(pathname, { method = 'GET', token, body, expectedStatus, headers = {}, parse = 'json' } = {}) {
+  const requestHeaders = { ...headers }
+  if (token) requestHeaders.Authorization = `Bearer ${token}`
+
+  let requestBody
+  if (body !== undefined) {
+    if (isFormDataBody(body)) {
+      requestBody = body
+    } else {
+      requestHeaders['Content-Type'] = 'application/json'
+      requestBody = JSON.stringify(body)
+    }
+  }
+
   const response = await fetch(`${baseUrl}${pathname}`, {
     method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {})
-    },
-    body: body === undefined ? undefined : JSON.stringify(body)
+    headers: requestHeaders,
+    body: requestBody
   })
+
+  if (expectedStatus !== undefined && response.status !== expectedStatus) {
+    const text = await response.text()
+    throw new Error(`${method} ${pathname} expected ${expectedStatus}, got ${response.status}: ${text}`)
+  }
+
+  if (parse === 'buffer') {
+    return {
+      status: response.status,
+      headers: response.headers,
+      buffer: Buffer.from(await response.arrayBuffer())
+    }
+  }
+
   const text = await response.text()
   let json = null
   try {
@@ -59,11 +92,118 @@ async function api(pathname, { method = 'GET', token, body, expectedStatus } = {
     json = { raw: text }
   }
 
-  if (expectedStatus !== undefined && response.status !== expectedStatus) {
-    throw new Error(`${method} ${pathname} expected ${expectedStatus}, got ${response.status}: ${text}`)
+  return {
+    status: response.status,
+    headers: response.headers,
+    json
   }
+}
 
-  return { status: response.status, json }
+function createUploadForm(fields, filename, contents, type = 'application/pdf') {
+  const form = new FormData()
+  for (const [key, value] of Object.entries(fields)) {
+    form.append(key, String(value))
+  }
+  form.append('file', new Blob([contents], { type }), filename)
+  return form
+}
+
+function buildUploadValidationQuestions() {
+  return [
+    {
+      type: 'upload',
+      title: 'Identity document',
+      required: false,
+      upload: { maxFiles: 1, maxSizeMb: 10, accept: '.pdf,application/pdf,application/octet-stream' }
+    },
+    {
+      type: 'upload',
+      title: 'Supporting document',
+      required: false,
+      upload: { maxFiles: 1, maxSizeMb: 10, accept: '.pdf,application/pdf,application/octet-stream' }
+    }
+  ]
+}
+
+function buildAnalyticsQuestions() {
+  return [
+    {
+      type: 'radio',
+      title: 'Did the workflow pass?',
+      options: [
+        { label: 'Yes', value: 'yes' },
+        { label: 'No', value: 'no' }
+      ]
+    },
+    {
+      type: 'checkbox',
+      title: 'Which channels were used?',
+      options: [
+        { label: 'API', value: 'api' },
+        { label: 'UI', value: 'ui' }
+      ]
+    },
+    {
+      type: 'input',
+      title: 'Notes'
+    },
+    {
+      type: 'slider',
+      title: 'Slider score'
+    },
+    {
+      type: 'rating',
+      title: 'Rating score',
+      validation: { min: 1, max: 5 }
+    },
+    {
+      type: 'scale',
+      title: 'Scale score',
+      validation: { min: 1, max: 10 }
+    },
+    {
+      type: 'matrix',
+      title: 'Matrix feedback',
+      options: [
+        { label: 'Good', value: '1' },
+        { label: 'Average', value: '2' },
+        { label: 'Bad', value: '3' }
+      ],
+      matrix: {
+        selectionType: 'single',
+        rows: [
+          { label: 'Service', value: '1' },
+          { label: 'Speed', value: '2' }
+        ]
+      }
+    },
+    {
+      type: 'ranking',
+      title: 'Rank the priorities',
+      options: [
+        { label: 'Quality', value: 'quality' },
+        { label: 'Speed', value: 'speed' }
+      ]
+    },
+    {
+      type: 'upload',
+      title: 'Upload evidence',
+      required: true,
+      upload: { maxFiles: 2, maxSizeMb: 10, accept: '.pdf,application/pdf,application/octet-stream' }
+    },
+    {
+      type: 'date',
+      title: 'Completed on'
+    }
+  ]
+}
+
+function findQuestionStat(questionStats, questionId) {
+  return (questionStats || []).find(item => Number(item?.questionId) === Number(questionId))
+}
+
+function countListHas(list, label, count) {
+  return Array.isArray(list) && list.some(item => item?.label === label && Number(item?.value) === Number(count))
 }
 
 async function ensureAdminUser() {
@@ -108,287 +248,694 @@ function spawnServer() {
 
 async function main() {
   let server
+  const stdout = []
+  const stderr = []
 
   try {
     await ensureAdminUser()
 
     server = spawnServer()
-    const stdout = []
-    const stderr = []
     server.stdout.on('data', chunk => stdout.push(String(chunk)))
     server.stderr.on('data', chunk => stderr.push(String(chunk)))
 
     await waitForHealth(server)
 
-    let response = await api('/health', { expectedStatus: 200 })
-    record('健康检查', response.json?.status === 'OK', { status: response.status })
+    let response = await request('/health', { expectedStatus: 200 })
+    record('health check', response.json?.status === 'OK', { status: response.status })
 
-    response = await api('/api/auth/login', {
+    response = await request('/api/auth/login', {
       method: 'POST',
       body: { username: adminUsername, password: adminPassword },
       expectedStatus: 200
     })
-    const adminToken = response.json.data.token
-    record('管理员登录', !!adminToken, { status: response.status })
+    const adminToken = response.json?.data?.token
+    record('admin login', !!adminToken, { status: response.status })
 
-    response = await api('/api/auth/me', { token: adminToken, expectedStatus: 200 })
-    record('管理员身份读取', response.json?.data?.role?.code === 'admin', { status: response.status })
-
-    response = await api('/api/auth/register', {
-      method: 'POST',
-      body: { username: testUser, email: `${testUser}@example.com`, password: 'User123456' },
+    response = await request('/api/auth/me', {
+      token: adminToken,
       expectedStatus: 200
     })
-    const userToken = response.json.data.token
-    record('普通用户注册', !!userToken, { status: response.status })
+    record('admin profile', response.json?.data?.role?.code === 'admin', { status: response.status })
 
-    response = await api('/api/auth/me', { token: userToken, expectedStatus: 200 })
-    record('普通用户身份读取', response.json?.data?.user?.username === testUser, { status: response.status })
+    response = await request('/api/auth/register', {
+      method: 'POST',
+      body: {
+        username: basicUsername,
+        email: `${basicUsername}@example.com`,
+        password: 'User123456'
+      },
+      expectedStatus: 200
+    })
+    const basicUserToken = response.json?.data?.token
+    record('basic user register', !!basicUserToken, { status: response.status })
 
-    response = await api('/api/depts', {
+    response = await request('/api/auth/me', {
+      token: basicUserToken,
+      expectedStatus: 200
+    })
+    record('basic user profile', response.json?.data?.user?.username === basicUsername, { status: response.status })
+
+    response = await request('/api/depts', {
       method: 'POST',
       token: adminToken,
-      body: { name: `系统测试部门-${runId}` },
+      body: { name: `Smoke Dept ${runId}` },
       expectedStatus: 200
     })
-    const deptId = response.json.data.id
-    record('创建部门', !!deptId, { status: response.status, deptId })
+    const deptId = response.json?.data?.id
+    record('create department', !!deptId, { status: response.status, deptId })
 
-    response = await api('/api/users/import', {
+    response = await request('/api/positions', {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        name: `Smoke Position ${runId}`,
+        code: positionCode,
+        remark: 'system smoke position'
+      },
+      expectedStatus: 200
+    })
+    const positionId = response.json?.data?.id
+    record('create position', !!positionId, { status: response.status, positionId })
+
+    response = await request('/api/positions', {
+      token: adminToken,
+      expectedStatus: 200
+    })
+    record('list positions', Array.isArray(response.json?.data) && response.json.data.some(item => Number(item.id) === Number(positionId)), { status: response.status })
+
+    response = await request(`/api/positions/${positionId}`, {
+      method: 'PUT',
+      token: adminToken,
+      body: {
+        name: `Smoke Position Updated ${runId}`,
+        code: updatedPositionCode,
+        isVirtual: true,
+        remark: 'updated by system smoke'
+      },
+      expectedStatus: 200
+    })
+    record('update position', response.json?.data?.code === updatedPositionCode && Boolean(response.json?.data?.is_virtual) === true, { status: response.status })
+
+    response = await request('/api/users/import', {
       method: 'POST',
       token: adminToken,
       body: {
         users: [{
-          username: importedUser,
-          email: `${importedUser}@example.com`,
+          username: importedUsername,
+          email: `${importedUsername}@example.com`,
           password: 'Import123456',
-          dept_id: deptId
+          dept_id: deptId,
+          position_id: positionId
         }]
       },
       expectedStatus: 200
     })
-    record('成员导入', response.json?.data?.created === 1 && response.json?.data?.skipped === 0, { status: response.status })
+    record('import member', response.json?.data?.created === 1 && response.json?.data?.skipped === 0, { status: response.status })
 
-    response = await api(`/api/users/${importedUser}`, { token: adminToken, expectedStatus: 200 })
-    const importedUserId = response.json.data.id
-    record('导入成员读取', Number(response.json?.data?.dept_id) === Number(deptId), { status: response.status, userId: importedUserId })
-
-    response = await api('/api/folders', {
-      method: 'POST',
+    response = await request(`/api/users/${importedUsername}`, {
       token: adminToken,
-      body: { name: `系统测试父文件夹-${runId}` },
       expectedStatus: 200
     })
-    const parentFolderId = response.json.data.id
-    record('创建父文件夹', !!parentFolderId, { status: response.status })
+    const importedUserId = response.json?.data?.id
+    record(
+      'read imported member',
+      Number(response.json?.data?.dept_id) === Number(deptId) && Number(response.json?.data?.position_id) === Number(positionId),
+      { status: response.status, userId: importedUserId }
+    )
 
-    response = await api('/api/folders', {
+    response = await request('/api/folders', {
       method: 'POST',
       token: adminToken,
-      body: { name: `系统测试子文件夹-${runId}`, parentId: parentFolderId },
+      body: { name: `Smoke Parent Folder ${runId}` },
       expectedStatus: 200
     })
-    const childFolderId = response.json.data.id
-    record('创建子文件夹', !!childFolderId, { status: response.status })
+    const parentFolderId = response.json?.data?.id
+    record('create parent folder', !!parentFolderId, { status: response.status })
 
-    response = await api(`/api/folders/${parentFolderId}`, {
+    response = await request('/api/folders', {
+      method: 'POST',
+      token: adminToken,
+      body: { name: `Smoke Child Folder ${runId}`, parentId: parentFolderId },
+      expectedStatus: 200
+    })
+    const childFolderId = response.json?.data?.id
+    record('create child folder', !!childFolderId, { status: response.status })
+
+    response = await request(`/api/folders/${parentFolderId}`, {
       method: 'DELETE',
       token: adminToken,
       expectedStatus: 409
     })
-    record('父文件夹删除保护', response.json?.error?.code === 'FOLDER_HAS_CHILDREN', { status: response.status })
+    record('parent folder delete guard', response.json?.error?.code === 'FOLDER_HAS_CHILDREN', { status: response.status })
 
-    response = await api('/api/folders', {
+    response = await request('/api/folders', {
       method: 'POST',
       token: adminToken,
-      body: { name: `系统测试工作文件夹-${runId}` },
+      body: { name: `Smoke Work Folder ${runId}` },
       expectedStatus: 200
     })
-    const workFolderId = response.json.data.id
-    record('创建工作文件夹', !!workFolderId, { status: response.status })
+    const workFolderId = response.json?.data?.id
+    record('create work folder', !!workFolderId, { status: response.status })
 
-    response = await api('/api/surveys', {
+    response = await request('/api/surveys', {
       method: 'POST',
       token: adminToken,
       body: {
-        title: `系统测试问卷-${runId}`,
-        description: '系统测试自动创建',
-        questions: [{
-          id: 'q1',
-          type: 'radio',
-          title: '是否通过',
-          options: [
-            { label: '是', value: 'yes' },
-            { label: '否', value: 'no' }
-          ]
-        }],
-        settings: { allowMultipleSubmissions: false },
+        title: `Smoke Upload Validation ${runId}`,
+        description: 'upload validation smoke survey',
+        questions: buildUploadValidationQuestions(),
+        settings: { allowMultipleSubmissions: true },
         style: { theme: 'default' }
       },
       expectedStatus: 200
     })
-    const surveyId = response.json.data.id
-    const shareCode = response.json.data.share_code || response.json.data.shareId
-    record('创建问卷', !!surveyId, { status: response.status, surveyId })
+    const uploadValidationSurveyId = response.json?.data?.id
+    record('create upload validation survey', !!uploadValidationSurveyId, { status: response.status, surveyId: uploadValidationSurveyId })
 
-    response = await api(`/api/surveys/${surveyId}/folder`, {
+    response = await request(`/api/surveys/${uploadValidationSurveyId}/publish`, {
+      method: 'POST',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    record('publish upload validation survey', response.json?.data?.status === 'published', { status: response.status })
+
+    const uploadValidationSessionA = `upload-guard-${runId}-a`
+    response = await request(`/api/surveys/${uploadValidationSurveyId}/uploads`, {
+      method: 'POST',
+      body: createUploadForm(
+        { questionId: 1, submissionToken: uploadValidationSessionA },
+        `upload-guard-a-${runId}.pdf`,
+        'upload validation A'
+      ),
+      expectedStatus: 200
+    })
+    const uploadGuardFileA = response.json?.data
+    record('public upload accepted', Number(uploadGuardFileA?.id) > 0 && Number(uploadGuardFileA?.surveyId) === Number(uploadValidationSurveyId), { status: response.status, fileId: uploadGuardFileA?.id })
+
+    response = await request(`/api/surveys/${uploadValidationSurveyId}/uploads`, {
+      method: 'POST',
+      body: createUploadForm(
+        { questionId: 1, submissionToken: uploadValidationSessionA },
+        `upload-guard-a-overflow-${runId}.pdf`,
+        'upload validation overflow'
+      ),
+      expectedStatus: 400
+    })
+    record('upload maxFiles enforced', response.json?.error?.code === 'UPLOAD_VALIDATION', { status: response.status })
+
+    response = await request(`/api/surveys/${uploadValidationSurveyId}/responses`, {
+      method: 'POST',
+      body: {
+        clientSubmissionToken: uploadValidationSessionA,
+        answers: [{
+          questionId: 1,
+          value: [{ id: uploadGuardFileA?.id, uploadToken: 'wrong-token' }]
+        }]
+      },
+      expectedStatus: 400
+    })
+    record('invalid upload token rejected', response.json?.error?.code === 'VALIDATION', { status: response.status })
+
+    const uploadValidationSessionB = `upload-guard-${runId}-b`
+    response = await request(`/api/surveys/${uploadValidationSurveyId}/uploads`, {
+      method: 'POST',
+      body: createUploadForm(
+        { questionId: 2, submissionToken: uploadValidationSessionB },
+        `upload-guard-b-${runId}.pdf`,
+        'upload validation B'
+      ),
+      expectedStatus: 200
+    })
+    const uploadGuardFileB = response.json?.data
+    record('second upload question accepted', Number(uploadGuardFileB?.id) > 0 && Number(uploadGuardFileB?.surveyId) === Number(uploadValidationSurveyId), { status: response.status, fileId: uploadGuardFileB?.id })
+
+    response = await request(`/api/surveys/${uploadValidationSurveyId}/responses`, {
+      method: 'POST',
+      body: {
+        clientSubmissionToken: uploadValidationSessionB,
+        answers: [{
+          questionId: 1,
+          value: [{ id: uploadGuardFileB?.id, uploadToken: uploadGuardFileB?.uploadToken }]
+        }]
+      },
+      expectedStatus: 400
+    })
+    record('upload question binding enforced', response.json?.error?.code === 'VALIDATION', { status: response.status })
+
+    response = await request('/api/surveys', {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        title: `Smoke Analytics ${runId}`,
+        description: 'analytics smoke survey',
+        questions: buildAnalyticsQuestions(),
+        settings: { allowMultipleSubmissions: true },
+        style: { theme: 'default' }
+      },
+      expectedStatus: 200
+    })
+    const analyticsSurveyId = response.json?.data?.id
+    const analyticsShareCode = response.json?.data?.share_code || response.json?.data?.shareId
+    record('create analytics survey', !!analyticsSurveyId, { status: response.status, surveyId: analyticsSurveyId })
+
+    response = await request(`/api/surveys/${analyticsSurveyId}/folder`, {
       method: 'PUT',
       token: adminToken,
       body: { folder_id: workFolderId },
       expectedStatus: 200
     })
-    record('移动问卷到文件夹', Number(response.json?.data?.folderId) === Number(workFolderId), { status: response.status })
+    record('move analytics survey to folder', Number(response.json?.data?.folderId) === Number(workFolderId), { status: response.status })
 
-    response = await api(`/api/surveys/${surveyId}/publish`, {
+    response = await request(`/api/surveys/${analyticsSurveyId}/publish`, {
       method: 'POST',
       token: adminToken,
       expectedStatus: 200
     })
-    record('发布问卷', response.json?.data?.status === 'published', { status: response.status })
+    record('publish analytics survey', response.json?.data?.status === 'published', { status: response.status })
 
-    response = await api(`/api/surveys/share/${shareCode}`, { expectedStatus: 200 })
-    record('公开读取已发布问卷', Number(response.json?.data?.id) === Number(surveyId), { status: response.status })
-
-    response = await api(`/api/surveys/${surveyId}/responses`, {
-      method: 'POST',
-      body: { answers: [{ id: 'q1', value: 'yes' }], duration: 18 },
+    response = await request(`/api/surveys/share/${analyticsShareCode}`, {
       expectedStatus: 200
     })
-    record('提交问卷答案', !!response.json?.data?.id, { status: response.status })
+    record('public read analytics survey', Number(response.json?.data?.id) === Number(analyticsSurveyId), { status: response.status })
 
-    response = await api(`/api/surveys/${surveyId}/results`, {
+    const analyticsSessionA = `analytics-${runId}-a`
+    response = await request(`/api/surveys/${analyticsSurveyId}/uploads`, {
+      method: 'POST',
+      body: createUploadForm(
+        { questionId: 9, submissionToken: analyticsSessionA },
+        `analytics-a-${runId}.pdf`,
+        'analytics upload A'
+      ),
+      expectedStatus: 200
+    })
+    const analyticsUploadA = response.json?.data
+    record('analytics upload A', Number(analyticsUploadA?.id) > 0, { status: response.status, fileId: analyticsUploadA?.id })
+
+    response = await request(`/api/surveys/${analyticsSurveyId}/responses`, {
+      method: 'POST',
+      headers: {
+        'User-Agent': SAFARI_IOS_UA,
+        'X-Forwarded-For': '10.10.10.1'
+      },
+      body: {
+        clientSubmissionToken: analyticsSessionA,
+        duration: 30,
+        answers: [
+          { questionId: 1, value: 'yes' },
+          { questionId: 2, value: ['api', 'ui'] },
+          { questionId: 3, value: 'first note' },
+          { questionId: 4, value: 5 },
+          { questionId: 5, value: 5 },
+          { questionId: 6, value: 9 },
+          { questionId: 7, value: { 1: '1', 2: '2' } },
+          { questionId: 8, value: ['quality', 'speed'] },
+          {
+            questionId: 9,
+            value: [{
+              id: analyticsUploadA?.id,
+              uploadToken: analyticsUploadA?.uploadToken,
+              name: analyticsUploadA?.name,
+              type: analyticsUploadA?.type,
+              size: analyticsUploadA?.size
+            }]
+          },
+          { questionId: 10, value: '2026-03-20' }
+        ]
+      },
+      expectedStatus: 200
+    })
+    const analyticsAnswerAId = response.json?.data?.id
+    record('submit analytics response A', !!analyticsAnswerAId, { status: response.status, answerId: analyticsAnswerAId })
+
+    const analyticsSessionB = `analytics-${runId}-b`
+    response = await request(`/api/surveys/${analyticsSurveyId}/uploads`, {
+      method: 'POST',
+      body: createUploadForm(
+        { questionId: 9, submissionToken: analyticsSessionB },
+        `analytics-b1-${runId}.pdf`,
+        'analytics upload B1'
+      ),
+      expectedStatus: 200
+    })
+    const analyticsUploadB1 = response.json?.data
+    record('analytics upload B1', Number(analyticsUploadB1?.id) > 0, { status: response.status, fileId: analyticsUploadB1?.id })
+
+    response = await request(`/api/surveys/${analyticsSurveyId}/uploads`, {
+      method: 'POST',
+      body: createUploadForm(
+        { questionId: 9, submissionToken: analyticsSessionB },
+        `analytics-b2-${runId}.pdf`,
+        'analytics upload B2'
+      ),
+      expectedStatus: 200
+    })
+    const analyticsUploadB2 = response.json?.data
+    record('analytics upload B2', Number(analyticsUploadB2?.id) > 0, { status: response.status, fileId: analyticsUploadB2?.id })
+
+    response = await request(`/api/surveys/${analyticsSurveyId}/responses`, {
+      method: 'POST',
+      headers: {
+        'User-Agent': CHROME_WINDOWS_UA,
+        'X-Forwarded-For': '10.10.10.2'
+      },
+      body: {
+        clientSubmissionToken: analyticsSessionB,
+        duration: 90,
+        answers: [
+          { questionId: 1, value: 'no' },
+          { questionId: 2, value: ['ui'] },
+          { questionId: 3, value: 'second note' },
+          { questionId: 4, value: 3 },
+          { questionId: 5, value: 3 },
+          { questionId: 6, value: 7 },
+          { questionId: 7, value: { 1: '2', 2: '1' } },
+          { questionId: 8, value: ['speed', 'quality'] },
+          {
+            questionId: 9,
+            value: [
+              {
+                id: analyticsUploadB1?.id,
+                uploadToken: analyticsUploadB1?.uploadToken,
+                name: analyticsUploadB1?.name,
+                type: analyticsUploadB1?.type,
+                size: analyticsUploadB1?.size
+              },
+              {
+                id: analyticsUploadB2?.id,
+                uploadToken: analyticsUploadB2?.uploadToken,
+                name: analyticsUploadB2?.name,
+                type: analyticsUploadB2?.type,
+                size: analyticsUploadB2?.size
+              }
+            ]
+          },
+          { questionId: 10, value: '2026-03-22' }
+        ]
+      },
+      expectedStatus: 200
+    })
+    const analyticsAnswerBId = response.json?.data?.id
+    record('submit analytics response B', !!analyticsAnswerBId, { status: response.status, answerId: analyticsAnswerBId })
+
+    response = await request(`/api/answers?survey_id=${analyticsSurveyId}&page=1&pageSize=20`, {
       token: adminToken,
       expectedStatus: 200
     })
-    record('读取问卷结果', Number(response.json?.data?.totalSubmissions) >= 1, { status: response.status })
+    const answerList = response.json?.data
+    record(
+      'list survey answers',
+      Number(answerList?.total) >= 2 &&
+      Array.isArray(answerList?.list) &&
+      answerList.list.some(item => Number(item.id) === Number(analyticsAnswerAId)) &&
+      answerList.list.some(item => Number(item.id) === Number(analyticsAnswerBId)),
+      { status: response.status, total: answerList?.total }
+    )
 
-    response = await api('/api/messages?types=audit,system', {
+    let binaryResponse = await request('/api/answers/download/survey', {
+      method: 'POST',
+      token: adminToken,
+      body: { survey_id: analyticsSurveyId },
+      expectedStatus: 200,
+      parse: 'buffer'
+    })
+    record(
+      'download survey excel',
+      String(binaryResponse.headers.get('content-type') || '').includes('spreadsheetml') &&
+      String(binaryResponse.headers.get('content-disposition') || '').includes(`survey-${analyticsSurveyId}.xlsx`) &&
+      binaryResponse.buffer.length > 100,
+      { status: binaryResponse.status, bytes: binaryResponse.buffer.length }
+    )
+
+    binaryResponse = await request('/api/answers/download/attachments', {
+      method: 'POST',
+      token: adminToken,
+      body: { survey_id: analyticsSurveyId },
+      expectedStatus: 200,
+      parse: 'buffer'
+    })
+    record(
+      'download attachment zip',
+      String(binaryResponse.headers.get('content-type') || '') === 'application/zip' &&
+      String(binaryResponse.headers.get('content-disposition') || '').includes(`survey-${analyticsSurveyId}-attachments.zip`) &&
+      binaryResponse.buffer.length > 20 &&
+      binaryResponse.buffer.subarray(0, 2).toString() === 'PK',
+      { status: binaryResponse.status, bytes: binaryResponse.buffer.length }
+    )
+
+    response = await request(`/api/surveys/${analyticsSurveyId}/results`, {
+      token: adminToken,
+      expectedStatus: 200
+    })
+    const resultsData = response.json?.data || {}
+    const radioStat = findQuestionStat(resultsData.questionStats, 1)
+    const ratingStat = findQuestionStat(resultsData.questionStats, 5)
+    const uploadStat = findQuestionStat(resultsData.questionStats, 9)
+
+    record(
+      'results summary',
+      Number(resultsData.totalSubmissions) === 2 &&
+      Number(resultsData.total) === 2 &&
+      Number(resultsData.today) === 2 &&
+      Array.isArray(resultsData.questionStats) &&
+      resultsData.questionStats.length === 10,
+      { status: response.status }
+    )
+    record(
+      'results radio stats',
+      radioStat?.options?.some(option => option.value === 'yes' && Number(option.count) === 1 && Number(option.percentage) === 50) &&
+      radioStat?.options?.some(option => option.value === 'no' && Number(option.count) === 1 && Number(option.percentage) === 50),
+      { status: response.status }
+    )
+    record(
+      'results rating stats',
+      Number(ratingStat?.avgScore) === 4 &&
+      Number(ratingStat?.distribution?.['5']) === 50 &&
+      Number(ratingStat?.distribution?.['3']) === 50,
+      { status: response.status }
+    )
+    record(
+      'results upload stats',
+      Number(uploadStat?.totalAnswers) === 2 &&
+      Number(uploadStat?.totalFiles) === 3 &&
+      Array.isArray(uploadStat?.sampleFiles) &&
+      uploadStat.sampleFiles.length === 3,
+      { status: response.status }
+    )
+    record(
+      'results system stats',
+      countListHas(resultsData?.systemStats?.devices, 'Desktop', 1) &&
+      countListHas(resultsData?.systemStats?.devices, 'Mobile', 1) &&
+      countListHas(resultsData?.systemStats?.browsers, 'Chrome', 1) &&
+      countListHas(resultsData?.systemStats?.browsers, 'Safari', 1) &&
+      countListHas(resultsData?.systemStats?.operatingSystems, 'Windows', 1) &&
+      countListHas(resultsData?.systemStats?.operatingSystems, 'iOS', 1),
+      { status: response.status }
+    )
+    record(
+      'results region empty state',
+      resultsData?.regionStats?.hasLocationData === false &&
+      Number(resultsData?.regionStats?.missingCount) === 2 &&
+      Array.isArray(resultsData?.regionStats?.items) &&
+      resultsData.regionStats.items.length === 0,
+      { status: response.status }
+    )
+
+    response = await request('/api/messages?types=audit,system', {
       token: adminToken,
       expectedStatus: 200
     })
     const messages = response.json?.data || []
-    record('读取消息列表', Array.isArray(messages) && messages.length > 0, { status: response.status, count: messages.length })
+    record('list messages', Array.isArray(messages) && messages.length > 0, { status: response.status, count: messages.length })
 
     if (messages.length > 0) {
       const firstMessageId = messages[0].id
-      const markRead = await api(`/api/messages/${firstMessageId}/read`, {
+      const markRead = await request(`/api/messages/${firstMessageId}/read`, {
         method: 'POST',
         token: adminToken,
         expectedStatus: 200
       })
-      record('标记消息已读', markRead.json?.data?.read === true, { status: markRead.status, messageId: firstMessageId })
+      record('mark message read', markRead.json?.data?.read === true, { status: markRead.status, messageId: firstMessageId })
     }
 
-    response = await api('/api/audits?page=1&pageSize=20', {
+    response = await request('/api/audits?page=1&pageSize=20', {
       token: adminToken,
       expectedStatus: 200
     })
-    record('读取审计日志', Array.isArray(response.json?.data) && response.json.data.length > 0, { status: response.status, total: response.json.total })
+    record('list audits', Array.isArray(response.json?.data) && response.json.data.length > 0, { status: response.status, total: response.json?.total })
 
-    response = await api(`/api/surveys/${surveyId}`, {
+    response = await request(`/api/surveys/${analyticsSurveyId}`, {
       method: 'DELETE',
       token: adminToken,
       expectedStatus: 200
     })
-    record('删除问卷进入回收站', !!response.json?.data?.deletedAt, { status: response.status })
+    record('move analytics survey to trash', !!response.json?.data?.deletedAt, { status: response.status })
 
-    response = await api('/api/surveys/trash', {
+    response = await request('/api/surveys/trash', {
       token: adminToken,
       expectedStatus: 200
     })
     const trashList = response.json?.data || []
-    record('读取回收站列表', trashList.some(item => Number(item.id) === Number(surveyId)), { status: response.status, count: trashList.length })
+    record('list trash', Array.isArray(trashList) && trashList.some(item => Number(item.id) === Number(analyticsSurveyId)), { status: response.status, count: trashList.length })
 
-    response = await api(`/api/surveys/${surveyId}/restore`, {
+    response = await request(`/api/surveys/${analyticsSurveyId}/restore`, {
       method: 'POST',
       token: adminToken,
       expectedStatus: 200
     })
-    record('恢复回收站问卷', Number(response.json?.data?.id) === Number(surveyId) && !response.json?.data?.deletedAt, { status: response.status })
+    record('restore analytics survey', Number(response.json?.data?.id) === Number(analyticsSurveyId) && !response.json?.data?.deletedAt, { status: response.status })
 
-    response = await api('/api/surveys', {
+    response = await request('/api/surveys', {
       method: 'POST',
       token: adminToken,
       body: {
-        title: `系统测试回收站问卷-${runId}`,
-        description: '待清空回收站',
+        title: `Smoke Trash ${runId}`,
+        description: 'trash cleanup smoke survey',
         questions: [{
-          id: 'q1',
           type: 'radio',
-          title: '是否保留',
+          title: 'Keep this survey?',
           options: [
-            { label: '是', value: 'yes' },
-            { label: '否', value: 'no' }
+            { label: 'Yes', value: 'yes' },
+            { label: 'No', value: 'no' }
           ]
         }]
       },
       expectedStatus: 200
     })
-    const trashSurveyId = response.json.data.id
-    record('创建回收站测试问卷', !!trashSurveyId, { status: response.status })
+    const trashSurveyId = response.json?.data?.id
+    record('create trash cleanup survey', !!trashSurveyId, { status: response.status, surveyId: trashSurveyId })
 
-    await api(`/api/surveys/${trashSurveyId}`, {
+    response = await request(`/api/surveys/${trashSurveyId}`, {
       method: 'DELETE',
       token: adminToken,
       expectedStatus: 200
     })
-    response = await api('/api/surveys/trash', {
-      method: 'DELETE',
-      token: adminToken,
-      expectedStatus: 200
-    })
-    record('清空回收站', Number(response.json?.data?.deleted) >= 1, { status: response.status, deleted: response.json?.data?.deleted })
+    record('trash cleanup survey delete', !!response.json?.data?.deletedAt, { status: response.status })
 
-    response = await api(`/api/folders/${workFolderId}`, {
+    await request(`/api/files/${uploadGuardFileA?.id}`, {
       method: 'DELETE',
       token: adminToken,
       expectedStatus: 200
     })
-    record('删除工作文件夹', response.json?.success === true, { status: response.status })
+    await request(`/api/files/${uploadGuardFileB?.id}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    await request(`/api/files/${analyticsUploadA?.id}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    await request(`/api/files/${analyticsUploadB1?.id}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    await request(`/api/files/${analyticsUploadB2?.id}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    await request(`/api/surveys/${uploadValidationSurveyId}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    await request(`/api/surveys/${analyticsSurveyId}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
 
-    await api(`/api/folders/${childFolderId}`, {
+    response = await request('/api/surveys/trash', {
       method: 'DELETE',
       token: adminToken,
       expectedStatus: 200
     })
-    response = await api(`/api/folders/${parentFolderId}`, {
-      method: 'DELETE',
-      token: adminToken,
-      expectedStatus: 200
-    })
-    record('删除父子文件夹', response.json?.success === true, { status: response.status })
+    record('clear trash', Number(response.json?.data?.deleted) >= 1, { status: response.status, deleted: response.json?.data?.deleted })
 
-    response = await api(`/api/depts/${deptId}`, {
+    response = await request(`/api/folders/${workFolderId}`, {
       method: 'DELETE',
       token: adminToken,
       expectedStatus: 200
     })
-    record('删除部门并清理成员归属', Number(response.json?.data?.clearedUsers) === 1, { status: response.status, clearedUsers: response.json?.data?.clearedUsers })
+    record('delete work folder', response.json?.success === true, { status: response.status })
 
-    response = await api(`/api/users/${importedUser}`, {
-      token: adminToken,
-      expectedStatus: 200
-    })
-    record('成员部门归属已清空', response.json?.data?.dept_id == null, { status: response.status })
-
-    await api(`/api/users/${importedUserId}`, {
+    await request(`/api/folders/${childFolderId}`, {
       method: 'DELETE',
       token: adminToken,
       expectedStatus: 200
     })
-    record('删除导入成员', true, { status: 200 })
+    response = await request(`/api/folders/${parentFolderId}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    record('delete parent and child folders', response.json?.success === true, { status: response.status })
+
+    response = await request(`/api/depts/${deptId}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    record('delete department and clear members', Number(response.json?.data?.clearedUsers) === 1, { status: response.status, clearedUsers: response.json?.data?.clearedUsers })
+
+    response = await request(`/api/users/${importedUsername}`, {
+      token: adminToken,
+      expectedStatus: 200
+    })
+    record('imported member dept cleared', response.json?.data?.dept_id == null, { status: response.status })
+
+    await request(`/api/users/${basicUsername}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    await request(`/api/users/${importedUserId}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    record('delete imported member', true, { status: 200 })
+
+    response = await request(`/api/positions/${positionId}`, {
+      method: 'DELETE',
+      token: adminToken,
+      expectedStatus: 200
+    })
+    record('delete position', response.json?.success === true, { status: response.status })
 
     const passed = results.filter(item => item.ok).length
     const failed = results.filter(item => !item.ok).length
-    const summary = { runId, environment: { dbHost: env.DB_HOST, dbPort: env.DB_PORT, dbName: env.DB_NAME, port: env.PORT }, passed, failed, results }
+    const summary = {
+      runId,
+      environment: {
+        dbHost: env.DB_HOST,
+        dbPort: env.DB_PORT,
+        dbName: env.DB_NAME,
+        port: env.PORT
+      },
+      passed,
+      failed,
+      results
+    }
     console.log(JSON.stringify(summary, null, 2))
     if (failed > 0) process.exitCode = 1
   } catch (error) {
     const summary = {
       runId,
-      environment: { dbHost: env.DB_HOST, dbPort: env.DB_PORT, dbName: env.DB_NAME, port: env.PORT },
+      environment: {
+        dbHost: env.DB_HOST,
+        dbPort: env.DB_PORT,
+        dbName: env.DB_NAME,
+        port: env.PORT
+      },
       error: String(error),
-      results
+      results,
+      serverLogs: {
+        stdout: stdout.slice(-20),
+        stderr: stderr.slice(-20)
+      }
     }
     console.log(JSON.stringify(summary, null, 2))
     process.exitCode = 1

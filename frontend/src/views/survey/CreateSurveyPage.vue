@@ -2,45 +2,10 @@
   创建问卷页面（CreateSurveyPage.vue） - 专业版
   参考问卷星等专业问卷平台设计
 
-  维护说明（题型扩展 14~42 状态一览）
-  注意：系统的持久化“权威题型”是后端字符串枚举（input/textarea/radio/...）。
-  本页面内部使用的数字编码是“编辑器层的内部枚举（legacy）”，提交/读取时会与字符串类型互相映射。
-
-  下表列出目前扩展题型（14~42）的接入状态与计划映射：
-  - 14 日期           -> 已映射后端 'date'（提交/读取已打通）
-  - 15 AI协助         -> UI 占位，未持久化（后续可映射为说明型/自定义类型）
-  - 16 AI问答         -> UI 占位，未持久化（同上）
-  - 17 分页符         -> UI 占位，未持久化（仅影响渲染，不入库）
-  - 18 段落说明       -> UI 占位，未持久化（可考虑映射为说明型题目）
-  - 19 折叠分组       -> UI 占位，未持久化（渲染容器能力）
-  - 20 矩阵单选       -> UI 占位，未持久化（后续收敛到后端 'matrix' 并加子维度）
-  - 21 矩阵多选       -> UI 占位，未持久化（同上）
-  - 22 矩阵量表       -> UI 占位，未持久化（同上）
-  - 23 矩阵滑动条     -> UI 占位，未持久化（同上）
-  - 24 矩阵下拉题     -> UI 占位，未持久化（同上）
-  - 25 矩阵填空       -> UI 占位，未持久化（同上）
-  - 26 矩阵混合       -> UI 占位，未持久化（同上）
-  - 27 表格填空       -> UI 占位，未持久化（可归入 matrix/table 统一能力）
-  - 28 表格组合       -> UI 占位，未持久化（同上）
-  - 29 星亮题         -> UI 占位，未持久化（可映射后端 'rating'）
-  - 30 NPS量表        -> UI 占位，未持久化（可映射后端 'scale'）
-  - 31 评分单选       -> UI 占位，未持久化（可映射 'rating' 或 'scale' + 约束）
-  - 32 评分多选       -> UI 占位，未持久化（同上）
-  - 33 评分矩阵       -> UI 占位，未持久化（可归入 'matrix' + rating 模式）
-  - 34 评价题         -> UI 占位，未持久化（可映射 'scale'）
-  - 35 排序           -> UI 占位，未持久化（已存在 11=ranking，建议收敛少枚举）
-  - 36 比重题         -> UI 占位，未持久化（需自定义校验与展示）
-  - 37 图像OCR        -> UI 占位，未持久化（可扩展 upload + 识别）
-  - 38 答题录音       -> UI 占位，未持久化（可扩展 upload）
-  - 39 图像题         -> UI 占位，未持久化（可扩展 upload）
-  - 40 预约           -> UI 占位，未持久化（可扩展 date/time + 校验）
-  - 41 视频题         -> UI 占位，未持久化（可扩展 upload）
-  - 42 VlookUp关联    -> UI 占位，未持久化（需数据联动设计）
-
-  已打通的映射（数字 -> 后端字符串）：
-  - 1:input, 2:textarea, 3:radio, 4:checkbox, 7:radio(下拉暂存为单选), 8:slider, 11:ranking, 13:upload, 14:date
-
-  维护建议：新增题型优先直接使用后端字符串类型，减少双向映射；对于仅影响展示的容器/分页类，请勿写入后端题库。
+  维护说明：
+  - 题型的唯一事实源在 `shared/questionTypeRegistry.js`
+  - 本页保留 legacy 数字编码，仅作为编辑器层表示；提交/读取时统一通过共享注册表映射
+  - 默认题目配置、题型语义判断、特殊渲染分支应优先复用共享注册表 helper
 -->
 <template>
   <div class="survey-editor">
@@ -346,6 +311,29 @@
                             </div>
                           </template>
                         </div>
+                        <div v-if="isMatrixLegacyQuestion(question.type)" class="matrix-rows-editor">
+                          <div class="matrix-rows-editor__header">
+                            <span>矩阵行</span>
+                            <button class="btn btn-link-sm" @click.stop="addMatrixRow(question)">+ 添加行</button>
+                          </div>
+                          <div class="matrix-rows-editor__list">
+                            <div
+                              v-for="(row, rowIndex) in ensureMatrixConfig(question).rows"
+                              :key="`row-${rowIndex}`"
+                              class="matrix-rows-editor__item"
+                            >
+                              <span class="matrix-rows-editor__index">{{ rowIndex + 1 }}</span>
+                              <input
+                                v-model="ensureMatrixConfig(question).rows[rowIndex]"
+                                class="matrix-rows-editor__input"
+                                :placeholder="`维度${rowIndex + 1}`"
+                              />
+                              <button class="icon-btn" @click.stop="removeMatrixRow(question, rowIndex)">
+                                <Remove class="icon" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       <!-- 高级功能链接 -->
                         <div class="advanced-options">
                           <template v-if="index > 0 && selectablePrevQs(index).length > 0">
@@ -392,6 +380,132 @@
                       <!-- 若非选择题，仍在题目下方显示摘要 -->
                       <div v-else-if="editingIndex === index && questionLogicSummary(index)" class="question-logic-hint">（{{ questionLogicSummary(index) }}）</div>
 
+                      <div v-else-if="editingIndex === index && isStandaloneConfigType(question.type)" class="standalone-editor">
+                        <template v-if="isSliderLegacyQuestion(question.type)">
+                          <div class="standalone-editor__row">
+                            <label class="standalone-editor__label">最小值</label>
+                            <input v-model.number="ensureSliderValidation(question).min" class="standalone-editor__input standalone-editor__input--sm" type="number" @change="normalizeSliderValidation(question)" />
+                            <label class="standalone-editor__label">最大值</label>
+                            <input v-model.number="ensureSliderValidation(question).max" class="standalone-editor__input standalone-editor__input--sm" type="number" @change="normalizeSliderValidation(question)" />
+                            <label class="standalone-editor__label">步长</label>
+                            <input v-model.number="ensureSliderValidation(question).step" class="standalone-editor__input standalone-editor__input--sm" type="number" min="1" @change="normalizeSliderValidation(question)" />
+                          </div>
+                          <div class="standalone-editor__preview">
+                            <el-slider
+                              :model-value="ensureSliderValidation(question).min"
+                              :min="ensureSliderValidation(question).min"
+                              :max="ensureSliderValidation(question).max"
+                              :step="ensureSliderValidation(question).step"
+                              disabled
+                            />
+                            <div class="standalone-editor__meta">
+                              <span>{{ ensureSliderValidation(question).min }}</span>
+                              <span>步长 {{ ensureSliderValidation(question).step }}</span>
+                              <span>{{ ensureSliderValidation(question).max }}</span>
+                            </div>
+                          </div>
+                        </template>
+                        <template v-else-if="isUploadLegacyQuestion(question.type)">
+                          <div class="standalone-editor__upload">
+                            <div class="standalone-editor__upload-box">点击或拖拽上传附件</div>
+                            <div class="standalone-editor__row">
+                              <label class="standalone-editor__label">最多文件</label>
+                              <input
+                                v-model.number="ensureUploadConfig(question).maxFiles"
+                                class="standalone-editor__input standalone-editor__input--sm"
+                                type="number"
+                                min="1"
+                                max="20"
+                                @change="normalizeUploadConfig(question)"
+                              />
+                              <label class="standalone-editor__label">单文件大小 MB</label>
+                              <input
+                                v-model.number="ensureUploadConfig(question).maxSizeMb"
+                                class="standalone-editor__input standalone-editor__input--sm"
+                                type="number"
+                                min="1"
+                                max="10"
+                                @change="normalizeUploadConfig(question)"
+                              />
+                            </div>
+                            <div class="standalone-editor__column">
+                              <label class="standalone-editor__label">允许格式</label>
+                              <input
+                                v-model="ensureUploadConfig(question).accept"
+                                class="standalone-editor__input standalone-editor__input--lg"
+                                type="text"
+                                placeholder=".jpg,.png,.pdf"
+                                @change="normalizeUploadConfig(question)"
+                              />
+                            </div>
+                            <div class="standalone-editor__tip">{{ uploadConfigSummary(question) }}</div>
+                          </div>
+                        </template>
+                        <template v-else-if="isRatingLegacyQuestion(question.type)">
+                          <div class="standalone-editor__column">
+                            <div class="standalone-editor__row">
+                              <label class="standalone-editor__label">最小分</label>
+                              <input v-model.number="ensureRatingValidation(question).min" class="standalone-editor__input standalone-editor__input--sm" type="number" min="1" max="10" @change="normalizeRatingValidation(question)" />
+                              <label class="standalone-editor__label">最大分</label>
+                              <input v-model.number="ensureRatingValidation(question).max" class="standalone-editor__input standalone-editor__input--sm" type="number" min="1" max="10" @change="normalizeRatingValidation(question)" />
+                            </div>
+                            <div class="standalone-editor__preview">
+                              <div class="star-rating">
+                                <span v-for="star in ensureRatingValidation(question).max" :key="`rating-${star}`" class="star">★</span>
+                              </div>
+                              <div class="standalone-editor__tip">填写页会按星级评分展示。</div>
+                            </div>
+                          </div>
+                        </template>
+                        <template v-else-if="isScaleLegacyQuestion(question.type)">
+                          <div class="standalone-editor__column">
+                            <div class="standalone-editor__row">
+                              <label class="standalone-editor__label">最小值</label>
+                              <input v-model.number="ensureScaleValidation(question).min" class="standalone-editor__input standalone-editor__input--sm" type="number" min="0" @change="normalizeScaleValidation(question)" />
+                              <label class="standalone-editor__label">最大值</label>
+                              <input v-model.number="ensureScaleValidation(question).max" class="standalone-editor__input standalone-editor__input--sm" type="number" min="1" @change="normalizeScaleValidation(question)" />
+                              <label class="standalone-editor__label">步长</label>
+                              <input v-model.number="ensureScaleValidation(question).step" class="standalone-editor__input standalone-editor__input--sm" type="number" min="1" @change="normalizeScaleValidation(question)" />
+                            </div>
+                            <div class="standalone-editor__row">
+                              <label class="standalone-editor__label">左侧标签</label>
+                              <input v-model="ensureScaleValidation(question).minLabel" class="standalone-editor__input standalone-editor__input--lg" type="text" placeholder="最低" />
+                            </div>
+                            <div class="standalone-editor__row">
+                              <label class="standalone-editor__label">右侧标签</label>
+                              <input v-model="ensureScaleValidation(question).maxLabel" class="standalone-editor__input standalone-editor__input--lg" type="text" placeholder="最高" />
+                            </div>
+                            <div class="standalone-editor__preview">
+                              <div class="scale-labels">
+                                <span>{{ ensureScaleValidation(question).minLabel }}</span>
+                                <span>{{ ensureScaleValidation(question).maxLabel }}</span>
+                              </div>
+                              <div class="scale-numbers">
+                                <button
+                                  v-for="value in getScalePreviewValues(question)"
+                                  :key="`scale-${value}`"
+                                  class="scale-btn"
+                                  type="button"
+                                  disabled
+                                >
+                                  {{ value }}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                        <template v-else-if="question.type === 14">
+                          <div class="standalone-editor__date">
+                            <input class="standalone-editor__input" type="date" disabled />
+                            <div class="standalone-editor__tip">填写页将使用原生日期选择器。</div>
+                          </div>
+                        </template>
+                        <template v-else-if="question.type === 18">
+                          <div class="standalone-editor__tip">该题型在填写页以说明块展示，不收集答案。</div>
+                        </template>
+                        <div v-if="questionLogicSummary(index)" class="question-logic-hint">（{{ questionLogicSummary(index) }}）</div>
+                      </div>
+
                       <!-- 通用底部设置栏（编辑时显示，统一“必答”入口） -->
                       <!-- 已合并到 advanced-options 中 -->
                       
@@ -399,7 +513,26 @@
                       
                       <!-- 完成编辑后的紧凑预览 -->
                       <div v-else class="question-compact-preview">
-                        <template v-if="hasOptions(question.type)">
+                        <template v-if="isMatrixLegacyQuestion(question.type)">
+                          <div class="matrix-preview">
+                            <div class="matrix-preview__table">
+                              <div class="matrix-preview__head">
+                                <span class="matrix-preview__corner">维度</span>
+                                <span v-for="(option, i) in question.options" :key="`matrix-col-${i}`" class="matrix-preview__cell matrix-preview__cell--head">
+                                  {{ option }}
+                                </span>
+                              </div>
+                              <div v-for="(row, rowIndex) in ensureMatrixConfig(question).rows" :key="`matrix-row-${rowIndex}`" class="matrix-preview__row">
+                                <span class="matrix-preview__cell matrix-preview__cell--row">{{ row }}</span>
+                                <span v-for="(_, i) in question.options" :key="`matrix-dot-${rowIndex}-${i}`" class="matrix-preview__cell">
+                                  <span class="matrix-preview__dot"></span>
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div v-if="questionLogicSummary(index)" class="question-logic-hint">（{{ questionLogicSummary(index) }}）</div>
+                        </template>
+                        <template v-else-if="hasOptions(question.type)">
                           <div class="options-preview">
                             <template v-for="(opt, i) in question.options" :key="i">
                               <div v-if="groupHeaderFor(question, i)" class="group-header">{{ groupHeaderFor(question, i) }}</div>
@@ -433,6 +566,12 @@
                           <div class="input-preview">
                             <span v-if="question.type === 1">填空题输入框</span>
                             <span v-else-if="question.type === 2">简答题输入框</span>
+                            <span v-else-if="isSliderLegacyQuestion(question.type)">滑动条：{{ ensureSliderValidation(question).min }} - {{ ensureSliderValidation(question).max }}</span>
+                            <span v-else-if="isRatingLegacyQuestion(question.type)">评分：{{ ensureRatingValidation(question).min }} - {{ ensureRatingValidation(question).max }} 星</span>
+                            <span v-else-if="isScaleLegacyQuestion(question.type)">量表：{{ ensureScaleValidation(question).min }} - {{ ensureScaleValidation(question).max }}</span>
+                            <span v-else-if="isUploadLegacyQuestion(question.type)">文件上传：{{ ensureUploadConfig(question).maxFiles }} 个以内</span>
+                            <span v-else-if="question.type === 14">日期选择器</span>
+                            <span v-else-if="question.type === 18">说明文字块</span>
                             <span v-else>{{ getQuestionTypeLabel(question.type) }}</span>
                           </div>
                           <div v-if="questionLogicSummary(index)" class="question-logic-hint">（{{ questionLogicSummary(index) }}）</div>
@@ -1293,7 +1432,18 @@ import SurveyAnswersPanel from './SurveyAnswersPanel.vue'
 // 新增：解耦的通用模块
 import { escapeHtml as escapeHtmlUtil, stripHtmlSimple as stripHtmlSimpleUtil, safeHtml as safeHtmlUtil } from '@/utils/html'
 import { generateQuestionId as generateQuestionIdUtil } from '@/utils/uid'
-import { toServerPayload as toServerPayloadUtil, mapLegacyTypeToServer } from '@/mappers/surveyMappers'
+import { mapLegacyTypeToServer, mapServerTypeToLegacy } from '@/mappers/surveyMappers'
+import {
+  IMPLEMENTED_LEGACY_QUESTION_TYPES,
+  getLegacyQuestionConfigPanel,
+  getLegacyQuestionDraftConfig,
+  getLegacyQuestionDefaultOptions,
+  getLegacyQuestionTypeLabel,
+  isImplementedLegacyQuestionType,
+  legacyQuestionMatchesServerType,
+  legacyQuestionTypeHasOptions
+} from '@/utils/questionTypeRegistry'
+import { buildUploadQuestionHelpText, DEFAULT_UPLOAD_ACCEPT, normalizeUploadQuestionConfig, sanitizeUploadAccept } from '@/utils/uploadQuestion'
 
 const router = useRouter()
 // 问卷说明：改为内联富文本组件，实时写入 surveyForm.description
@@ -1377,7 +1527,6 @@ function selectablePrevQs(targetIdx:number){
   return (surveyForm.questions||[]).slice(0, targetIdx)
 }
 
-function isOptionTypeByLegacy(t:number){ return [3,4,7,11,29,30,31,32,20,21,24].includes(Number(t)) && Array.isArray(([] as any)) }
 function openLogicDialog(index:number){
   // 第1题不允许设置题目关联；或者前面没有可依赖的选择题时也不允许
   if (index <= 0) return
@@ -1595,20 +1744,61 @@ function showAISuggestion() {
   ElMessage.info('AI自动生成答案功能开发中...')
 }
 
-// 批量添加时构建默认题目：遵循“隐藏题号”的全局状态
-function createDefaultQuestion(type:number): Question {
-  // 简化的带选项题型集合（与 hasOptions 保持一致但避免前置依赖）
-  const typesWithOptions = new Set([3,4,7,20,21,24,31,32,11,36,29,30])
-  const q: Question = {
+function isMatrixLegacyQuestion(type: number | string): boolean {
+  return legacyQuestionMatchesServerType(type, 'matrix')
+}
+
+function isSliderLegacyQuestion(type: number | string): boolean {
+  return legacyQuestionMatchesServerType(type, 'slider')
+}
+
+function isUploadLegacyQuestion(type: number | string): boolean {
+  return legacyQuestionMatchesServerType(type, 'upload')
+}
+
+function isRatingLegacyQuestion(type: number | string): boolean {
+  return legacyQuestionMatchesServerType(type, 'rating')
+}
+
+function isScaleLegacyQuestion(type: number | string): boolean {
+  return legacyQuestionMatchesServerType(type, 'scale')
+}
+
+function buildLegacyQuestion(type: number): Question {
+  const question: Question = {
     id: generateQuestionId(),
     type,
     title: '',
     required: false,
-    options: typesWithOptions.has(type) ? ['选项1','选项2'] : undefined,
+    options: getLegacyQuestionDefaultOptions(type),
     optionOrder: 'none',
     hideSystemNumber: areAllNumbersHidden.value
   }
-  return q
+
+  const draftConfig = getLegacyQuestionDraftConfig<{
+    validation?: Record<string, unknown>
+    upload?: { maxFiles?: number; maxSizeMb?: number; accept?: string }
+    matrix?: { rows?: string[]; selectionType?: 'single' | 'multiple' }
+  }>(type)
+  if (draftConfig?.validation) {
+    question.validation = { ...draftConfig.validation }
+  }
+  if (draftConfig?.upload) {
+    question.upload = { ...draftConfig.upload }
+  }
+  if (draftConfig?.matrix) {
+    question.matrix = {
+      ...draftConfig.matrix,
+      rows: Array.isArray(draftConfig.matrix.rows) ? [...draftConfig.matrix.rows] : []
+    }
+  }
+
+  return question
+}
+
+// 批量添加时构建默认题目：遵循“隐藏题号”的全局状态
+function createDefaultQuestion(type:number): Question {
+  return buildLegacyQuestion(type)
 }
 
 function saveBatchAddQuestions() {
@@ -2225,100 +2415,6 @@ function saveOptionDialogOne(){
   ElMessage.success('已保存当前选项的关联')
 }
 
-// 题目类型枚举（完整版）
-const QuestionType = {
-  FillBlank: 1,        // 填空题
-  ShortAnswer: 2,      // 简答题
-  SingleChoice: 3,     // 单选题
-  MultipleChoice: 4,   // 多选题
-  Scale: 5,            // 量表题
-  Matrix: 6,           // 矩阵题
-  Dropdown: 7,         // 下拉题
-  Slider: 8,           // 滑动条题
-  MultiFillBlank: 9,   // 多项填空题
-  MatrixFillBlank: 10, // 矩阵填空
-  Sort: 11,            // 排序题
-  Ratio: 12,           // 比重题
-  FileUpload: 13,      // 文件上传题
-  Date: 14,            // 日期
-  AIAssist: 15,        // AI协助
-  AIChat: 16,          // AI问答
-  PageBreak: 17,       // 分页符
-  StageExplain: 18,    // 段落说明
-  FoldingGroup: 19,    // 折叠分组
-  // 矩阵题扩展
-  MatrixSingle: 20,    // 矩阵单选
-  MatrixMultiple: 21,  // 矩阵多选
-  MatrixScale: 22,     // 矩阵量表
-  MatrixSlider: 23,    // 矩阵滑动条
-  MatrixDropdown: 24,  // 矩阵下拉
-  MatrixFill: 25,      // 矩阵填空
-  MatrixMixed: 26,     // 矩阵混合
-  TableFillBlank: 27,  // 表格填空
-  TableMixed: 28,      // 表格组合
-  // 评分题
-  StarRating: 29,      // 星亮题
-  NPSRating: 30,       // NPS量表
-  ScoreRating: 31,     // 评分单选
-  ScoreMultiple: 32,   // 评分多选
-  ScoreMatrix: 33,     // 评分矩阵
-  ScoreScale: 34,      // 评价题
-  // 高级题型
-  Sorting: 35,         // 排序
-  Comparison: 36,      // 比重题
-  ImageOCR: 37,        // 图像OCR
-  VoiceUpload: 38,     // 答题录音
-  ImageUpload: 39,     // 图像题
-  Booking: 40,         // 预约
-  VideoUpload: 41,     // 视频题
-  VlookUp: 42          // VlookUp问卷关联
-} as const
-
-const QuestionTypeLabel: Record<number, string> = {
-  1: '填空题',
-  2: '简答题', 
-  3: '单选题',
-  4: '多选题',
-  5: '量表题',
-  6: '矩阵题',
-  7: '下拉题',
-  8: '滑动条题',
-  9: '多项填空题',
-  10: '矩阵填空',
-  11: '排序题',
-  12: '比重题',
-  13: '文件上传',
-  14: '日期',
-  15: 'AI协助',
-  16: 'AI问答',
-  17: '分页符',
-  18: '段落说明',
-  19: '折叠分组',
-  20: '矩阵单选',
-  21: '矩阵多选',
-  22: '矩阵量表',
-  23: '矩阵滑动条',
-  24: '矩阵下拉题',
-  25: '矩阵填空',
-  26: '矩阵混合',
-  27: '表格填空',
-  28: '表格组合',
-  29: '星亮题',
-  30: 'NPS量表',
-  31: '评分单选',
-  32: '评分多选',
-  33: '评分矩阵',
-  34: '评价题',
-  35: '排序',
-  36: '比重题',
-  37: '图像OCR',
-  38: '答题录音',
-  39: '图像题',
-  40: '预约',
-  41: '视频题',
-  42: 'VlookUp问卷关联'
-}
-
 // 题目数据类型
 interface Question {
   id: string
@@ -2328,8 +2424,18 @@ interface Question {
   description?: string
   required: boolean
   options?: string[]
+  matrix?: {
+    rows?: string[]
+    selectionType?: 'single' | 'multiple'
+  }
   optionOrder?: 'none' | 'all' | 'flip' | 'firstFixed' | 'lastFixed'
   hideSystemNumber?: boolean
+  validation?: Record<string, unknown>
+  upload?: {
+    maxFiles?: number
+    maxSizeMb?: number
+    accept?: string
+  }
 }
 
 // 响应式数据
@@ -2443,9 +2549,9 @@ const aiPrompt = ref('')
 
 // 答案管理数据
 const answerStats = reactive({
-  total: 126,
-  today: 8,
-  avgScore: 87.5
+  total: 0,
+  today: 0,
+  avgScore: 0
 })
 
 // 分类展开状态
@@ -2519,8 +2625,8 @@ const validateForm = () => {
   }
 }
 
-const getQuestionTypeLabel = (type: number): string => {
-  return QuestionTypeLabel[type] || '未知题型'
+const getQuestionTypeLabel = (type: number | string): string => {
+  return getLegacyQuestionTypeLabel(type)
 }
 
 // 答卷详情动作在下方“答案管理方法”处实现
@@ -2580,29 +2686,22 @@ onMounted(async () => {
         console.warn('加载答案统计失败，使用默认值:', err)
       }
       
-      // 题目映射：后端为 string 类型 type（radio/checkbox/input/textarea/...），需要映射回本页数字类型
-      const mapServerTypeToLegacy = (t: string): number => {
-        switch (t) {
-          case 'input': return 1
-          case 'textarea': return 2
-          case 'radio': return 3
-          case 'checkbox': return 4
-          case 'ranking': return 11
-          case 'upload': return 13
-          case 'date': return 14
-          case 'slider': return 8
-          default: return 1
-        }
-      }
       const qs = Array.isArray(s.questions) ? s.questions : []
       surveyForm.questions = qs.map((q: any, __i:number) => ({
         id: q.id ? String(q.id) : generateQuestionId(),
-        type: mapServerTypeToLegacy(q.type || 'input'),
+        type: mapServerTypeToLegacy(q.type || 'input', q.uiType),
         title: q.title || '',
         // 将后端的富文本标题一并挂到本地 question 上，供保存及预览使用
         ...(q.titleHtml ? { titleHtml: q.titleHtml } : {}),
         description: q.description || '',
         required: !!q.required,
+        validation: q.validation || undefined,
+        matrix: q.matrix
+          ? {
+              rows: Array.isArray(q.matrix.rows) ? q.matrix.rows.map((row: any) => row.label ?? String(row)) : [],
+              selectionType: q.matrix.selectionType === 'multiple' ? 'multiple' : 'single'
+            }
+          : undefined,
         hideSystemNumber: !!q.hideSystemNumber,
         quotasEnabled: !!q.quotasEnabled,
         quotaMode: (q as any).quotaMode || 'explicit',
@@ -2724,11 +2823,135 @@ function goBack() {
 
 // 题型实现状态
 const getQuestionConfig = (type: number) => {
-  const implementedTypes = [1, 2, 3, 4, 7, 18] // 已实现的基础题型
   return {
-    implemented: implementedTypes.includes(type),
-    name: QuestionTypeLabel[type] || `题型${type}`
+    implemented: isImplementedLegacyQuestionType(type),
+    name: getQuestionTypeLabel(type)
   }
+}
+
+function isStandaloneConfigType(type: number): boolean {
+  return getLegacyQuestionConfigPanel(type) === 'standalone'
+}
+
+function ensureSliderValidation(question: any) {
+  question.validation = question.validation && typeof question.validation === 'object' ? question.validation : {}
+  const min = Number(question.validation.min)
+  const max = Number(question.validation.max)
+  const step = Number(question.validation.step)
+  question.validation.min = Number.isFinite(min) ? min : 0
+  question.validation.max = Number.isFinite(max) ? max : 100
+  question.validation.step = Number.isFinite(step) && step > 0 ? step : 1
+  return question.validation as { min: number; max: number; step: number }
+}
+
+function normalizeSliderValidation(question: any) {
+  const validation = ensureSliderValidation(question)
+  if (validation.max < validation.min) validation.max = validation.min
+  if (validation.step <= 0) validation.step = 1
+}
+
+function ensureRatingValidation(question: any) {
+  question.validation = question.validation && typeof question.validation === 'object' ? question.validation : {}
+  const min = Number(question.validation.min)
+  const max = Number(question.validation.max)
+  question.validation.min = Number.isFinite(min) ? min : 1
+  question.validation.max = Number.isFinite(max) ? max : 5
+  question.validation.step = 1
+  return question.validation as { min: number; max: number; step: number }
+}
+
+function normalizeRatingValidation(question: any) {
+  const validation = ensureRatingValidation(question)
+  validation.min = Math.max(1, Math.min(10, Math.floor(Number(validation.min) || 1)))
+  validation.max = Math.max(validation.min, Math.min(10, Math.floor(Number(validation.max) || 5)))
+  validation.step = 1
+}
+
+function ensureScaleValidation(question: any) {
+  question.validation = question.validation && typeof question.validation === 'object' ? question.validation : {}
+  const min = Number(question.validation.min)
+  const max = Number(question.validation.max)
+  const step = Number(question.validation.step)
+  question.validation.min = Number.isFinite(min) ? min : 0
+  question.validation.max = Number.isFinite(max) ? max : 10
+  question.validation.step = Number.isFinite(step) && step > 0 ? step : 1
+  if (question.validation.minLabel == null) question.validation.minLabel = '最低'
+  if (question.validation.maxLabel == null) question.validation.maxLabel = '最高'
+  return question.validation as {
+    min: number
+    max: number
+    step: number
+    minLabel?: string
+    maxLabel?: string
+  }
+}
+
+function normalizeScaleValidation(question: any) {
+  const validation = ensureScaleValidation(question)
+  validation.min = Math.max(0, Math.min(100, Math.floor(Number(validation.min) || 0)))
+  validation.max = Math.max(validation.min + 1, Math.min(100, Math.floor(Number(validation.max) || 10)))
+  validation.step = Math.max(1, Math.floor(Number(validation.step) || 1))
+}
+
+function getScalePreviewValues(question: any) {
+  const validation = ensureScaleValidation(question)
+  const values: number[] = []
+  for (let value = validation.min; value <= validation.max; value += validation.step) {
+    values.push(value)
+  }
+  return values
+}
+
+function ensureMatrixConfig(question: any) {
+  question.matrix = question.matrix && typeof question.matrix === 'object' ? question.matrix : {}
+  question.matrix.selectionType = question.matrix.selectionType === 'multiple' ? 'multiple' : 'single'
+  if (!Array.isArray(question.matrix.rows) || question.matrix.rows.length === 0) {
+    question.matrix.rows = ['服务态度', '响应速度', '专业程度']
+  }
+  question.matrix.rows = question.matrix.rows.map((row: any, index: number) => {
+    if (typeof row === 'string') return row
+    return String(row?.label ?? row?.text ?? `维度${index + 1}`)
+  })
+  return question.matrix as { rows: string[]; selectionType: 'single' | 'multiple' }
+}
+
+function addMatrixRow(question: any) {
+  const matrix = ensureMatrixConfig(question)
+  matrix.rows.push(`维度${matrix.rows.length + 1}`)
+}
+
+function removeMatrixRow(question: any, rowIndex: number) {
+  const matrix = ensureMatrixConfig(question)
+  if (rowIndex < 0 || rowIndex >= matrix.rows.length) return
+  matrix.rows.splice(rowIndex, 1)
+}
+
+function ensureUploadConfig(question: any) {
+  const normalized = normalizeUploadQuestionConfig(question)
+  question.upload = {
+    maxFiles: normalized.maxFiles,
+    maxSizeMb: normalized.maxSizeMb,
+    accept: normalized.accept || DEFAULT_UPLOAD_ACCEPT
+  }
+  return question.upload as { maxFiles: number; maxSizeMb: number; accept: string }
+}
+
+function normalizeUploadConfig(question: any) {
+  const upload = ensureUploadConfig(question)
+  upload.maxFiles = Math.max(1, Math.min(20, Math.floor(Number(upload.maxFiles) || 1)))
+  upload.maxSizeMb = Math.max(1, Math.min(10, Number(upload.maxSizeMb) || 10))
+  upload.accept = sanitizeUploadAccept(upload.accept)
+}
+
+function uploadConfigSummary(question: any) {
+  return buildUploadQuestionHelpText(question)
+}
+
+function getImplementedQuestionNames() {
+  return Array.from(IMPLEMENTED_LEGACY_QUESTION_TYPES)
+    .sort((a, b) => a - b)
+    .map(type => `• ${getLegacyQuestionTypeLabel(type)}`)
+    .join('\n')
 }
 
 // 通过题型添加问题
@@ -2740,50 +2963,15 @@ const addQuestionByType = (type: number) => {
   
   // 如果题型未实现，显示提示
   if (!config.implemented) {
-    alert(`${config.name} 正在开发中，敬请期待！\n\n已实现的题型：\n• 单项填空\n• 简答题\n• 单选题\n• 多选题\n• 下拉题\n• 段落说明`)
+    alert(`${config.name} 正在开发中，敬请期待！\n\n已实现的题型：\n${getImplementedQuestionNames()}`)
     return
   }
   
-  let defaultOptions = undefined
-  
-  // 根据题型设置默认选项
-  if (hasOptions(type)) {
-    switch (type) {
-      case 3: // 单选题
-      case 4: // 多选题
-      case 7: // 下拉题
-        defaultOptions = ['选项1', '选项2']
-        break
-      case 11: // 排序题
-        defaultOptions = ['项目1', '项目2', '项目3']
-        break
-      case 29: // 星亮题
-        defaultOptions = ['1星', '2星', '3星', '4星', '5星']
-        break
-      case 30: // NPS量表
-        defaultOptions = Array.from({length: 11}, (_, i) => `${i}分`)
-        break
-      case 20: // 矩阵单选
-      case 21: // 矩阵多选
-        defaultOptions = ['非常满意', '满意', '一般', '不满意', '非常不满意']
-        break
-      case 31: // 评分单选
-      case 32: // 评分多选
-        defaultOptions = ['优秀', '良好', '一般', '较差']
-        break
-      default:
-        defaultOptions = ['选项1', '选项2']
-    }
-  }
+  const defaultOptions = getLegacyQuestionDefaultOptions(type)
   
   const question: Question = {
-    id: generateQuestionId(),
-    type: type,
-    title: '',
-    required: false,
-    options: defaultOptions,
-    optionOrder: 'none',
-    hideSystemNumber: areAllNumbersHidden.value
+    ...buildLegacyQuestion(type),
+    options: defaultOptions
   }
   
   surveyForm.questions.push(question)
@@ -2794,13 +2982,7 @@ const addQuestionByType = (type: number) => {
 
 // 判断题型是否需要选项
 const hasOptions = (type: number): boolean => {
-  return [
-    3, 4, 7,      // 单选、多选、下拉
-    20, 21, 24,   // 矩阵单选、矩阵多选、矩阵下拉
-    31, 32,       // 评分单选、评分多选
-    11, 36,       // 排序题、比重题
-    29, 30        // 星亮题、NPS量表
-  ].includes(type)
+  return legacyQuestionTypeHasOptions(type)
 }
 
 // 获取选项标签
@@ -2937,7 +3119,16 @@ const duplicateQuestion = (index: number) => {
   const duplicatedQuestion = {
     ...originalQuestion,
     id: generateQuestionId(),
-    title: `${originalQuestion.title}（副本）`
+    title: `${originalQuestion.title}（副本）`,
+    options: Array.isArray(originalQuestion.options) ? [...originalQuestion.options] : undefined,
+    validation: originalQuestion.validation ? { ...originalQuestion.validation } : undefined,
+    upload: originalQuestion.upload ? { ...originalQuestion.upload } : undefined,
+    matrix: originalQuestion.matrix
+      ? {
+          rows: Array.isArray(originalQuestion.matrix.rows) ? [...originalQuestion.matrix.rows] : undefined,
+          selectionType: originalQuestion.matrix.selectionType
+        }
+      : undefined
   }
   surveyForm.questions.splice(index + 1, 0, duplicatedQuestion)
 }
@@ -2960,15 +3151,21 @@ const finishEdit = (index?: number) => {
 // 在当前题后插入空白一题（同类型）
 function addQuestionAfter(index:number){
   const cur:any = surveyForm.questions[index]
-  const newQ:any = {
-    id: generateQuestionId(),
-    type: cur.type,
-    title: '',
-    required: false,
-    options: Array.isArray(cur.options) ? ['选项1','选项2'] : undefined,
-    optionOrder: 'none',
-    // 继承当前全局隐藏状态；若有需求也可改为继承前一题的设置
-    hideSystemNumber: areAllNumbersHidden.value
+  const newQ:any = buildLegacyQuestion(Number(cur.type))
+  if (isSliderLegacyQuestion(cur.type)) {
+    newQ.validation = { ...ensureSliderValidation(cur) }
+  }
+  if (isRatingLegacyQuestion(cur.type)) {
+    newQ.validation = { ...ensureRatingValidation(cur) }
+  }
+  if (isScaleLegacyQuestion(cur.type)) {
+    newQ.validation = { ...ensureScaleValidation(cur) }
+  }
+  if (isMatrixLegacyQuestion(cur.type)) {
+    newQ.matrix = { rows: [...ensureMatrixConfig(cur).rows], selectionType: ensureMatrixConfig(cur).selectionType }
+  }
+  if (isUploadLegacyQuestion(cur.type)) {
+    newQ.upload = { ...ensureUploadConfig(cur) }
   }
   surveyForm.questions.splice(index+1, 0, newQ)
 }
@@ -3035,6 +3232,7 @@ const toServerPayload = () => {
   const questions = surveyForm.questions.map((q, idx) => {
     const idToOrder = Object.fromEntries(surveyForm.questions.map((qq, ii) => [String(qq.id), String(ii+1)]))
     const base: any = {
+      uiType: Number((q as any).uiType ?? q.type),
       type: mapLegacyTypeToServer(q.type),
       title: q.title,
       // 持久化富文本标题（若存在）
@@ -3044,7 +3242,10 @@ const toServerPayload = () => {
       order: idx + 1,
       hideSystemNumber: !!q.hideSystemNumber
     }
-    const isOptionType = ['radio','checkbox','ranking'].includes(base.type)
+    if ((q as any).validation && typeof (q as any).validation === 'object') {
+      base.validation = { ...(q as any).validation }
+    }
+    const isOptionType = ['radio','checkbox','ranking', 'matrix'].includes(base.type)
     if (isOptionType) {
       base.options = (q.options || []).map((label, i) => {
         const extra:any = (q as any).optionExtras?.[i] || {}
@@ -3122,6 +3323,37 @@ const toServerPayload = () => {
       // 跳题逻辑：直接透传到后端（目标为题号字符串或 'end'）
       if ((q as any).jumpLogic) {
         base.jumpLogic = (q as any).jumpLogic
+      }
+    }
+    if (base.type === 'matrix') {
+      const matrix = ensureMatrixConfig(q)
+      base.matrix = {
+        selectionType: matrix.selectionType,
+        rows: matrix.rows.map((label: string, i: number) => ({
+          label,
+          value: String(i + 1),
+          order: i + 1
+        }))
+      }
+    }
+    if (base.type === 'rating') {
+      const validation = ensureRatingValidation(q)
+      base.validation = {
+        ...base.validation,
+        min: validation.min,
+        max: validation.max,
+        step: 1
+      }
+    }
+    if (base.type === 'scale') {
+      const validation = ensureScaleValidation(q)
+      base.validation = {
+        ...base.validation,
+        min: validation.min,
+        max: validation.max,
+        step: validation.step,
+        minLabel: validation.minLabel || '',
+        maxLabel: validation.maxLabel || ''
       }
     }
     // 显示逻辑：将前端可视化配置写入后端；把 qid 统一映射为题目“序号字符串”，便于后端校验
@@ -4473,6 +4705,192 @@ function safeHtml(raw: string): string { return safeHtmlUtil(raw) }
   color: #666;
   font-size: 0.875rem;
   font-style: italic;
+}
+
+.standalone-editor {
+  margin-top: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.standalone-editor__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.standalone-editor__column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.standalone-editor__label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.standalone-editor__input {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #111827;
+}
+
+.standalone-editor__input--sm {
+  width: 88px;
+}
+
+.standalone-editor__input--lg {
+  width: min(100%, 460px);
+}
+
+.standalone-editor__preview {
+  padding: 8px 4px 0;
+}
+
+.standalone-editor__meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.standalone-editor__upload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.standalone-editor__upload-box {
+  padding: 18px 16px;
+  border: 1px dashed #94a3b8;
+  border-radius: 10px;
+  background: #fff;
+  color: #475569;
+  text-align: center;
+}
+
+.standalone-editor__date {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.standalone-editor__tip {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.matrix-rows-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #dbe3ee;
+}
+
+.matrix-rows-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.matrix-rows-editor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.matrix-rows-editor__item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 36px;
+  gap: 10px;
+  align-items: center;
+}
+
+.matrix-rows-editor__index {
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
+}
+
+.matrix-rows-editor__input {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.matrix-preview {
+  overflow-x: auto;
+}
+
+.matrix-preview__table {
+  min-width: 420px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.matrix-preview__head,
+.matrix-preview__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) repeat(auto-fit, minmax(72px, 1fr));
+}
+
+.matrix-preview__cell,
+.matrix-preview__corner {
+  padding: 10px 12px;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: center;
+  color: #475569;
+  font-size: 13px;
+}
+
+.matrix-preview__cell--head,
+.matrix-preview__corner {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #334155;
+}
+
+.matrix-preview__cell--row {
+  text-align: left;
+  color: #111827;
+}
+
+.matrix-preview__row:last-child .matrix-preview__cell {
+  border-bottom: none;
+}
+
+.matrix-preview__cell:last-child,
+.matrix-preview__corner:last-child {
+  border-right: none;
+}
+
+.matrix-preview__dot {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  border-radius: 999px;
+  border: 1.5px solid #cbd5e1;
+  background: #fff;
 }
 
 /* 预览区域样式已迁移至独立预览页 */

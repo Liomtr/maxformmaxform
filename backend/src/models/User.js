@@ -16,16 +16,16 @@ const User = {
     return knex(TABLE).where('email', email).first()
   },
 
-  async create({ username, email, password, role_id, dept_id }) {
+  async create({ username, email, password, role_id, dept_id, position_id }) {
     const hash = await bcrypt.hash(password, 10)
     const [id] = await knex(TABLE).insert({
-      username, email, password: hash, role_id, dept_id
+      username, email, password: hash, role_id, dept_id, position_id
     })
     return User.findById(id)
   },
 
   async update(id, fields) {
-    const allowed = ['email', 'avatar', 'is_active', 'dept_id', 'role_id']
+    const allowed = ['email', 'avatar', 'is_active', 'dept_id', 'role_id', 'position_id']
     const data = {}
     for (const k of allowed) {
       if (fields[k] !== undefined) data[k] = fields[k]
@@ -49,7 +49,7 @@ const User = {
   },
 
   async list({ page = 1, pageSize = 20, dept_id, is_active } = {}) {
-    let q = knex(TABLE).select('id', 'username', 'email', 'role_id', 'dept_id', 'avatar', 'is_active', 'last_login_at', 'created_at')
+    let q = knex(TABLE).select('id', 'username', 'email', 'role_id', 'dept_id', 'position_id', 'avatar', 'is_active', 'last_login_at', 'created_at')
     if (dept_id !== undefined) q = q.where('dept_id', dept_id)
     if (is_active !== undefined) q = q.where('is_active', is_active)
     const total = await q.clone().count('* as cnt').first().then(r => r.cnt)

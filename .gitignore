@@ -38,6 +38,7 @@ frontend/test-results/
 .env.*.local
 backend/.env
 frontend/.env
+backend/uploads/
 
 # Editor/OS
 .vscode/

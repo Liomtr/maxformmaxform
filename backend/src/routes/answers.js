@@ -1,8 +1,13 @@
 import { Router } from 'express'
+import fs from 'fs'
+import path from 'path'
+import archiver from 'archiver'
 import ExcelJS from 'exceljs'
 import Answer from '../models/Answer.js'
 import Survey from '../models/Survey.js'
+import FileModel from '../models/File.js'
 import { authRequired } from '../middlewares/auth.js'
+import { UPLOAD_DIR } from '../utils/uploadStorage.js'
 
 const router = Router()
 
@@ -134,6 +139,58 @@ router.post('/download/survey', authRequired, async (req, res, next) => {
     res.setHeader('Content-Disposition', `attachment; filename="survey-${survey.id}.xlsx"`)
     const buffer = await workbook.xlsx.writeBuffer()
     res.send(buffer)
+  } catch (e) { next(e) }
+})
+
+router.post('/download/attachments', authRequired, async (req, res, next) => {
+  try {
+    const { survey_id } = req.body || {}
+    if (!survey_id) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION', message: '缺少 survey_id' } })
+    }
+
+    const survey = await loadManagedSurvey(req, res, survey_id)
+    if (!survey) return
+
+    const files = await FileModel.listAnswerFilesBySurveyId(survey.id)
+    const existingFiles = files
+      .map(file => {
+        const filename = path.basename(String(file?.url || ''))
+        const filePath = path.join(UPLOAD_DIR, filename)
+        return {
+          ...file,
+          filePath
+        }
+      })
+      .filter(file => file.answer_id && file.url && fs.existsSync(file.filePath))
+
+    if (existingFiles.length === 0) {
+      return res.status(404).json({ success: false, error: { code: 'NO_FILES', message: '当前问卷没有可打包下载的附件' } })
+    }
+
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename="survey-${survey.id}-attachments.zip"`)
+
+    const archive = archiver('zip', { zlib: { level: 9 } })
+    archive.on('error', err => {
+      if (!res.headersSent) {
+        next(err)
+        return
+      }
+      res.destroy(err)
+    })
+
+    archive.pipe(res)
+
+    for (const file of existingFiles) {
+      const safeName = String(file.name || path.basename(file.filePath))
+        .replace(/[\\/:*?"<>|]/g, '_')
+      archive.file(file.filePath, {
+        name: `answer-${file.answer_id}/${file.id}-${safeName}`
+      })
+    }
+
+    await archive.finalize()
   } catch (e) { next(e) }
 })
 

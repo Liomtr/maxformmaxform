@@ -1,3 +1,5 @@
+import { legacyQuestionTypeHasOptions } from '@/utils/questionTypeRegistry'
+
 // 题型常量与工具
 export const QUESTION_TYPES = {
   SINGLE: 1,
@@ -37,11 +39,9 @@ export const QUESTION_TYPES = {
 export type QuestionTypeKey = keyof typeof QUESTION_TYPES
 
 export const QUESTION_TYPE_HAS_OPTIONS = new Set<number>([
-  QUESTION_TYPES.SINGLE,
-  QUESTION_TYPES.MULTI,
+  ...Object.values(QUESTION_TYPES).filter(type => legacyQuestionTypeHasOptions(type)),
   QUESTION_TYPES.MATRIX_SINGLE,
   QUESTION_TYPES.MATRIX_MULTI,
-  QUESTION_TYPES.SORT,
   QUESTION_TYPES.RANK,
-  QUESTION_TYPES.IMAGE_CHOICE,
+  QUESTION_TYPES.IMAGE_CHOICE
 ])
