@@ -178,6 +178,15 @@ function buildAnalyticsQuestions() {
       }
     },
     {
+      type: 'ratio',
+      title: 'Ratio allocation',
+      options: [
+        { label: 'Brand', value: 'brand' },
+        { label: 'Price', value: 'price' },
+        { label: 'Service', value: 'service' }
+      ]
+    },
+    {
       type: 'ranking',
       title: 'Rank the priorities',
       options: [
@@ -522,7 +531,7 @@ async function main() {
     response = await request(`/api/surveys/${analyticsSurveyId}/uploads`, {
       method: 'POST',
       body: createUploadForm(
-        { questionId: 9, submissionToken: analyticsSessionA },
+        { questionId: 10, submissionToken: analyticsSessionA },
         `analytics-a-${runId}.pdf`,
         'analytics upload A'
       ),
@@ -548,18 +557,16 @@ async function main() {
           { questionId: 5, value: 5 },
           { questionId: 6, value: 9 },
           { questionId: 7, value: { 1: '1', 2: '2' } },
-          { questionId: 8, value: ['quality', 'speed'] },
+          { questionId: 8, value: { brand: 50, price: 30, service: 20 } },
+          { questionId: 9, value: ['quality', 'speed'] },
           {
-            questionId: 9,
+            questionId: 10,
             value: [{
               id: analyticsUploadA?.id,
-              uploadToken: analyticsUploadA?.uploadToken,
-              name: analyticsUploadA?.name,
-              type: analyticsUploadA?.type,
-              size: analyticsUploadA?.size
+              uploadToken: analyticsUploadA?.uploadToken
             }]
           },
-          { questionId: 10, value: '2026-03-20' }
+          { questionId: 11, value: '2026-03-20' }
         ]
       },
       expectedStatus: 200
@@ -571,7 +578,7 @@ async function main() {
     response = await request(`/api/surveys/${analyticsSurveyId}/uploads`, {
       method: 'POST',
       body: createUploadForm(
-        { questionId: 9, submissionToken: analyticsSessionB },
+        { questionId: 10, submissionToken: analyticsSessionB },
         `analytics-b1-${runId}.pdf`,
         'analytics upload B1'
       ),
@@ -583,7 +590,7 @@ async function main() {
     response = await request(`/api/surveys/${analyticsSurveyId}/uploads`, {
       method: 'POST',
       body: createUploadForm(
-        { questionId: 9, submissionToken: analyticsSessionB },
+        { questionId: 10, submissionToken: analyticsSessionB },
         `analytics-b2-${runId}.pdf`,
         'analytics upload B2'
       ),
@@ -609,27 +616,22 @@ async function main() {
           { questionId: 5, value: 3 },
           { questionId: 6, value: 7 },
           { questionId: 7, value: { 1: '2', 2: '1' } },
-          { questionId: 8, value: ['speed', 'quality'] },
+          { questionId: 8, value: { brand: 40, price: 40, service: 20 } },
+          { questionId: 9, value: ['speed', 'quality'] },
           {
-            questionId: 9,
+            questionId: 10,
             value: [
               {
                 id: analyticsUploadB1?.id,
-                uploadToken: analyticsUploadB1?.uploadToken,
-                name: analyticsUploadB1?.name,
-                type: analyticsUploadB1?.type,
-                size: analyticsUploadB1?.size
+                uploadToken: analyticsUploadB1?.uploadToken
               },
               {
                 id: analyticsUploadB2?.id,
-                uploadToken: analyticsUploadB2?.uploadToken,
-                name: analyticsUploadB2?.name,
-                type: analyticsUploadB2?.type,
-                size: analyticsUploadB2?.size
+                uploadToken: analyticsUploadB2?.uploadToken
               }
             ]
           },
-          { questionId: 10, value: '2026-03-22' }
+          { questionId: 11, value: '2026-03-22' }
         ]
       },
       expectedStatus: 200
@@ -689,7 +691,8 @@ async function main() {
     const resultsData = response.json?.data || {}
     const radioStat = findQuestionStat(resultsData.questionStats, 1)
     const ratingStat = findQuestionStat(resultsData.questionStats, 5)
-    const uploadStat = findQuestionStat(resultsData.questionStats, 9)
+    const ratioStat = findQuestionStat(resultsData.questionStats, 8)
+    const uploadStat = findQuestionStat(resultsData.questionStats, 10)
 
     record(
       'results summary',
@@ -697,7 +700,14 @@ async function main() {
       Number(resultsData.total) === 2 &&
       Number(resultsData.today) === 2 &&
       Array.isArray(resultsData.questionStats) &&
-      resultsData.questionStats.length === 10,
+      resultsData.questionStats.length === 11,
+      { status: response.status }
+    )
+    record(
+      'results ratio stats',
+      ratioStat?.options?.some(option => option.value === 'brand' && Number(option.avgShare) === 45) &&
+      ratioStat?.options?.some(option => option.value === 'price' && Number(option.avgShare) === 35) &&
+      ratioStat?.options?.some(option => option.value === 'service' && Number(option.avgShare) === 20),
       { status: response.status }
     )
     record(

@@ -141,6 +141,7 @@ defineProps<{
 .mobile-fill-inner :deep(.slider-answer),
 .mobile-fill-inner :deep(.rating-answer),
 .mobile-fill-inner :deep(.scale-answer),
+.mobile-fill-inner :deep(.ratio-answer),
 .mobile-fill-inner :deep(.matrix-answer),
 .mobile-fill-inner :deep(.ranking-answer),
 .mobile-fill-inner :deep(.upload-answer),

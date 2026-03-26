@@ -82,6 +82,8 @@ export interface SurveyResultOptionStat {
   count: number
   percentage: number
   avgRank?: number | null
+  avgShare?: number | null
+  totalShare?: number | null
 }
 
 export interface SurveyResultFileStat {

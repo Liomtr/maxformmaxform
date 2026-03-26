@@ -8,6 +8,10 @@
           <span v-if="activeSurveyId">问卷 ID：{{ activeSurveyId }}</span>
           <span v-if="activeSurveyId">共 {{ total }} 份答卷</span>
         </p>
+        <p v-if="activeStartTime || activeEndTime" class="filter-summary">
+          <span v-if="activeStartTime">开始：{{ formatDateTime(activeStartTime) }}</span>
+          <span v-if="activeEndTime">结束：{{ formatDateTime(activeEndTime) }}</span>
+        </p>
       </div>
 
       <div class="toolbar">
@@ -52,6 +56,11 @@
           <p>
             <span v-if="total">显示第 {{ startItem }} - {{ endItem }} 条</span>
             <span v-else>当前问卷暂无答卷</span>
+          </p>
+          <p v-if="activeStartTime || activeEndTime" class="filter-meta">
+            <span v-if="activeStartTime">开始：{{ formatDateTime(activeStartTime) }}</span>
+            <span v-if="activeEndTime">结束：{{ formatDateTime(activeEndTime) }}</span>
+            <button class="btn ghost btn-sm" type="button" @click="clearTimeFilter">清除筛选</button>
           </p>
         </div>
         <div class="table-header-actions">
@@ -123,6 +132,8 @@ const router = useRouter()
 const surveyIdInput = ref('')
 const activeSurveyId = ref('')
 const surveyTitle = ref('')
+const activeStartTime = ref('')
+const activeEndTime = ref('')
 const answers = ref<Answer[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -206,6 +217,8 @@ function syncRouteQuery() {
   const query: Record<string, string> = {}
   if (activeSurveyId.value) query.surveyId = activeSurveyId.value
   if (surveyTitle.value) query.title = surveyTitle.value
+  if (activeStartTime.value) query.startTime = activeStartTime.value
+  if (activeEndTime.value) query.endTime = activeEndTime.value
   router.replace({ name: 'AnswerManagement', query })
 }
 
@@ -224,7 +237,9 @@ async function load() {
     const result = await listAnswers({
       survey_id: activeSurveyId.value,
       page: page.value,
-      pageSize: PAGE_SIZE
+      pageSize: PAGE_SIZE,
+      startTime: activeStartTime.value || undefined,
+      endTime: activeEndTime.value || undefined
     })
     answers.value = result.list
     total.value = result.total
@@ -248,6 +263,12 @@ function initializeFromRoute() {
   surveyTitle.value = Array.isArray(route.query.title)
     ? String(route.query.title[0] ?? '')
     : String(route.query.title ?? '')
+  activeStartTime.value = Array.isArray(route.query.startTime)
+    ? String(route.query.startTime[0] ?? '')
+    : String(route.query.startTime ?? '')
+  activeEndTime.value = Array.isArray(route.query.endTime)
+    ? String(route.query.endTime[0] ?? '')
+    : String(route.query.endTime ?? '')
 }
 
 async function applySurveyId() {
@@ -264,6 +285,14 @@ async function applySurveyId() {
 }
 
 async function reload() {
+  await load()
+}
+
+async function clearTimeFilter() {
+  activeStartTime.value = ''
+  activeEndTime.value = ''
+  page.value = 1
+  syncRouteQuery()
   await load()
 }
 
@@ -319,6 +348,8 @@ watch(
   async () => {
     const previousSurveyId = activeSurveyId.value
     const previousTitle = surveyTitle.value
+    const previousStartTime = activeStartTime.value
+    const previousEndTime = activeEndTime.value
 
     initializeFromRoute()
 
@@ -330,7 +361,12 @@ watch(
       return
     }
 
-    if (previousSurveyId !== activeSurveyId.value || previousTitle !== surveyTitle.value) {
+    if (
+      previousSurveyId !== activeSurveyId.value ||
+      previousTitle !== surveyTitle.value ||
+      previousStartTime !== activeStartTime.value ||
+      previousEndTime !== activeEndTime.value
+    ) {
       page.value = 1
       await load()
     }
@@ -394,6 +430,17 @@ onMounted(async () => {
   font-size: 14px;
 }
 
+.filter-summary,
+.filter-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -427,6 +474,11 @@ onMounted(async () => {
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.btn-sm {
+  padding: 8px 12px;
+  font-size: 12px;
 }
 
 .btn:hover:not(:disabled) {

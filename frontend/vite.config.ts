@@ -2,6 +2,10 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
+function normalizeModuleId(id: string) {
+  return id.replace(/\\/g, '/')
+}
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -32,6 +36,61 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    sourcemap: false
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const moduleId = normalizeModuleId(id)
+          if (!moduleId.includes('node_modules')) return
+          if (moduleId.includes('/node_modules/zrender/')) return 'vendor-zrender'
+          if (moduleId.includes('/node_modules/echarts/core') || moduleId.includes('/node_modules/echarts/lib/core')) {
+            return 'vendor-echarts-core'
+          }
+          if (moduleId.includes('/node_modules/echarts/charts') || moduleId.includes('/node_modules/echarts/lib/chart')) {
+            return 'vendor-echarts-charts'
+          }
+          if (moduleId.includes('/node_modules/echarts/components') || moduleId.includes('/node_modules/echarts/lib/component')) {
+            return 'vendor-echarts-components'
+          }
+          if (moduleId.includes('/node_modules/echarts/renderers') || moduleId.includes('/node_modules/echarts/lib/renderer')) {
+            return 'vendor-echarts-renderers'
+          }
+          if (moduleId.includes('/node_modules/echarts/')) return 'vendor-echarts'
+
+          if (moduleId.includes('/node_modules/@element-plus/icons-vue/')) {
+            return 'vendor-element-plus-icons'
+          }
+
+          const elementPlusComponentMatch = moduleId.match(/\/node_modules\/element-plus\/es\/components\/([^/]+)\//)
+          if (elementPlusComponentMatch) {
+            return `vendor-ep-${elementPlusComponentMatch[1]}`
+          }
+
+          if (moduleId.includes('/node_modules/element-plus/')) {
+            return 'vendor-element-plus-core'
+          }
+
+          if (moduleId.includes('/node_modules/quill/')) {
+            return 'vendor-quill'
+          }
+
+          if (moduleId.includes('/node_modules/@wangeditor/editor-for-vue/')) {
+            return 'vendor-wangeditor-vue'
+          }
+
+          if (moduleId.includes('/node_modules/@wangeditor/')) {
+            return 'vendor-wangeditor-core'
+          }
+
+          if (moduleId.includes('/node_modules/highlight.js/')) {
+            return 'vendor-highlight'
+          }
+
+          if (moduleId.includes('/node_modules/vue/') || moduleId.includes('/node_modules/pinia/') || moduleId.includes('/node_modules/vue-router/')) {
+            return 'vendor-vue'
+          }
+        }
+      }
+    }
   }
 })

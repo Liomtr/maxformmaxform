@@ -143,6 +143,39 @@
               </template>
             </template>
             <!-- 排序题 -->
+            <template v-else-if="q.type === 'ratio'">
+              <div class="ratio-answer">
+                <div class="ratio-answer__summary" :class="{ invalid: hasRatioAnswer(q, idx) && !isRatioTotalValid(q, idx) }">
+                  <span>当前合计 {{ formatRatioValue(getRatioTotal(q, idx)) }}%</span>
+                  <span>剩余 {{ formatRatioValue(getRatioRemaining(q, idx)) }}%</span>
+                </div>
+                <div class="ratio-answer__list">
+                  <div
+                    v-for="opt in filteredOptions(q, idx).filter((item: any) => item.value != null)"
+                    :key="`ratio-${String(opt.value)}`"
+                    class="ratio-answer__item"
+                  >
+                    <div class="ratio-answer__meta">
+                      <span v-if="!opt.rich" class="ratio-answer__label">{{ opt.label }}</span>
+                      <span v-else class="ratio-answer__label" v-html="opt.label"></span>
+                      <div v-if="opt.desc" class="ratio-answer__desc" v-html="opt.desc"></div>
+                    </div>
+                    <div class="ratio-answer__control">
+                      <el-input-number
+                        :model-value="getRatioAnswerValue(q, idx, opt.value)"
+                        :min="0"
+                        :max="100"
+                        :step="1"
+                        :precision="0"
+                        controls-position="right"
+                        @change="onRatioChange(q, idx, opt.value, $event)"
+                      />
+                      <span class="ratio-answer__suffix">%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
             <template v-else-if="q.type === 'ranking'">
               <div class="ranking-answer">
                 <div
@@ -240,8 +273,30 @@
               </div>
             </template>
             <template v-else-if="q.type === 'matrix'">
-              <div class="matrix-answer">
-                <div class="matrix-answer-table">
+              <div class="matrix-answer" :class="{ 'matrix-answer--dropdown': isMatrixDropdownQuestion(q) }">
+                <template v-if="isMatrixDropdownQuestion(q)">
+                  <div
+                    v-for="row in getMatrixRows(q)"
+                    :key="`matrix-select-row-${row.value}`"
+                    class="matrix-answer-select-row"
+                  >
+                    <span class="matrix-answer-select-row__label">{{ row.label }}</span>
+                    <el-select
+                      :model-value="getMatrixAnswerValue(q, idx, row.value)"
+                      placeholder="请选择"
+                      class="matrix-answer-select-row__control"
+                      @change="onMatrixSingleChange(q, idx, row.value, $event)"
+                    >
+                      <el-option
+                        v-for="column in getMatrixColumns(q, idx)"
+                        :key="`matrix-select-option-${row.value}-${column.value}`"
+                        :label="column.label"
+                        :value="String(column.value)"
+                      />
+                    </el-select>
+                  </div>
+                </template>
+                <div v-else class="matrix-answer-table">
                   <div class="matrix-answer-row matrix-answer-row--head">
                     <span class="matrix-answer-cell matrix-answer-cell--row">维度</span>
                     <span
@@ -263,7 +318,13 @@
                       :key="`matrix-cell-${row.value}-${column.value}`"
                       class="matrix-answer-cell"
                     >
+                      <el-checkbox
+                        v-if="isMatrixMultipleQuestion(q)"
+                        :model-value="isMatrixOptionChecked(q, idx, row.value, column.value)"
+                        @change="onMatrixMultipleChange(q, idx, row.value, column.value, $event)"
+                      />
                       <el-radio
+                        v-else
                         :model-value="getMatrixAnswerValue(q, idx, row.value)"
                         :label="String(column.value)"
                         @change="onMatrixSingleChange(q, idx, row.value, column.value)"
@@ -459,30 +520,154 @@ function getMatrixColumns(q: any, idx: number) {
   return (filteredOptions(q, idx) || []).filter((item: any) => item.value != null)
 }
 
+function getMatrixSelectionType(q: any): 'single' | 'multiple' {
+  return q?.matrix?.selectionType === 'multiple' ? 'multiple' : 'single'
+}
+
+function isMatrixMultipleQuestion(q: any) {
+  return getMatrixSelectionType(q) === 'multiple'
+}
+
+function isMatrixDropdownQuestion(q: any) {
+  return getRenderType(q) === 'matrix_dropdown'
+}
+
 function getMatrixAnswerValue(q: any, idx: number, rowValue: string) {
   const key = String(q.id ?? (idx + 1))
   const answer = form.value[key]
   if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return ''
-  return String(answer[rowValue] ?? '')
+  const rowAnswer = answer[rowValue]
+  if (Array.isArray(rowAnswer)) return String(rowAnswer[0] ?? '')
+  return String(rowAnswer ?? '')
+}
+
+function getMatrixAnswerValues(q: any, idx: number, rowValue: string) {
+  const key = String(q.id ?? (idx + 1))
+  const answer = form.value[key]
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return []
+  const rowAnswer = answer[rowValue]
+  return Array.isArray(rowAnswer) ? rowAnswer.map((item: any) => String(item)) : []
+}
+
+function isMatrixOptionChecked(q: any, idx: number, rowValue: string, columnValue: string) {
+  return getMatrixAnswerValues(q, idx, rowValue).includes(String(columnValue))
 }
 
 function onMatrixSingleChange(q: any, idx: number, rowValue: string, columnValue: string) {
   const key = String(q.id ?? (idx + 1))
   const current = form.value[key]
   const next = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {}
-  next[String(rowValue)] = String(columnValue)
+  const normalizedValue = String(columnValue ?? '').trim()
+  if (normalizedValue) {
+    next[String(rowValue)] = normalizedValue
+  } else {
+    delete next[String(rowValue)]
+  }
+  form.value[key] = next
+}
+
+function onMatrixMultipleChange(q: any, idx: number, rowValue: string, columnValue: string, checked: unknown) {
+  const key = String(q.id ?? (idx + 1))
+  const current = form.value[key]
+  const next = current && typeof current === 'object' && !Array.isArray(current) ? { ...current } : {}
+  const rowKey = String(rowValue)
+  const normalizedColumnValue = String(columnValue)
+  const selected = new Set(getMatrixAnswerValues(q, idx, rowKey))
+
+  if (checked === true) {
+    selected.add(normalizedColumnValue)
+  } else {
+    selected.delete(normalizedColumnValue)
+  }
+
+  const selectedValues = Array.from(selected)
+  if (selectedValues.length > 0) {
+    next[rowKey] = selectedValues
+  } else {
+    delete next[rowKey]
+  }
   form.value[key] = next
 }
 
 function isMatrixAnswerComplete(q: any, idx: number) {
   const rows = getMatrixRows(q)
   if (rows.length === 0) return false
-  return rows.every((row: { value: string }) => getMatrixAnswerValue(q, idx, row.value) !== '')
+  return rows.every((row: { value: string }) => {
+    if (isMatrixMultipleQuestion(q)) {
+      return getMatrixAnswerValues(q, idx, row.value).length > 0
+    }
+    return getMatrixAnswerValue(q, idx, row.value) !== ''
+  })
+}
+
+function getRatioAnswerMap(q: any, idx: number): Record<string, number> {
+  const key = String(q.id ?? (idx + 1))
+  const answer = form.value[key]
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return {}
+
+  return Object.fromEntries(
+    Object.entries(answer)
+      .map(([optionKey, rawValue]) => {
+        const numeric = Number(rawValue)
+        return [String(optionKey), Number.isFinite(numeric) ? numeric : null]
+      })
+      .filter(([, numeric]) => numeric != null)
+  ) as Record<string, number>
+}
+
+function getRatioAnswerValue(q: any, idx: number, optionValue: string) {
+  const map = getRatioAnswerMap(q, idx)
+  const value = map[String(optionValue)]
+  return Number.isFinite(value) ? value : null
+}
+
+function onRatioChange(q: any, idx: number, optionValue: string, nextValue: unknown) {
+  const key = String(q.id ?? (idx + 1))
+  const current = { ...getRatioAnswerMap(q, idx) }
+  const numeric = Number(nextValue)
+  const optionKey = String(optionValue)
+
+  if (!Number.isFinite(numeric)) {
+    delete current[optionKey]
+  } else {
+    current[optionKey] = Math.min(100, Math.max(0, Math.round(numeric)))
+  }
+
+  form.value[key] = current
+}
+
+function getRatioTotal(q: any, idx: number) {
+  return Number(
+    Object.values(getRatioAnswerMap(q, idx))
+      .reduce((sum, value) => sum + Number(value || 0), 0)
+      .toFixed(2)
+  )
+}
+
+function getRatioRemaining(q: any, idx: number) {
+  return Number((100 - getRatioTotal(q, idx)).toFixed(2))
+}
+
+function hasRatioAnswer(q: any, idx: number) {
+  return Object.keys(getRatioAnswerMap(q, idx)).length > 0
+}
+
+function isRatioTotalValid(q: any, idx: number) {
+  return Math.abs(getRatioTotal(q, idx) - 100) <= 0.01
+}
+
+function isRatioAnswerValid(q: any, idx: number, required = false) {
+  if (!hasRatioAnswer(q, idx)) return !required
+  return isRatioTotalValid(q, idx)
+}
+
+function formatRatioValue(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2)
 }
 
 function getEmptyAnswerValue(q: any) {
   if (q?.type === 'checkbox' || q?.type === 'ranking' || q?.type === 'upload') return []
-  if (q?.type === 'matrix') return {}
+  if (q?.type === 'matrix' || q?.type === 'ratio') return {}
   if (q?.type === 'slider') return null
   return ''
 }
@@ -852,7 +1037,23 @@ onMounted(async () => {
           form.value[fillKey] = ''
         }
       })
-      if (q.required) {
+      if (q.type === 'ratio') {
+        nextRules[key] = [{
+          validator: (_rule: any, value: any, callback: (error?: Error) => void) => {
+            const hasValue = value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0
+            if (!hasValue && !q.required) {
+              callback()
+              return
+            }
+            if (isRatioAnswerValid(q, index, !!q.required)) {
+              callback()
+              return
+            }
+            callback(new Error('请将比重分配合计调整到 100%'))
+          },
+          trigger: 'change'
+        }]
+      } else if (q.required) {
         if (q.type === 'checkbox' || q.type === 'ranking' || q.type === 'upload') {
           nextRules[key] = [{ type: 'array', required: true, message: '此题为必选', trigger: 'change' }]
         } else if (q.type === 'matrix') {
@@ -1018,8 +1219,30 @@ watch(form, () => {
           if (current && typeof current === 'object' && !Array.isArray(current)) {
             const next = Object.fromEntries(
               Object.entries(current)
-                .map(([rowKey, value]) => [String(rowKey), String(value ?? '')])
-                .filter(([, value]) => value === '' || allowed.has(value))
+                .map(([rowKey, value]) => {
+                  if (isMatrixMultipleQuestion(q)) {
+                    const normalized = Array.isArray(value)
+                      ? Array.from(new Set(value.map((item: any) => String(item)).filter(item => allowed.has(item))))
+                      : []
+                    return [String(rowKey), normalized]
+                  }
+                  return [String(rowKey), String(value ?? '')]
+                })
+                .filter(([, value]) => {
+                  if (Array.isArray(value)) return value.length > 0
+                  return value === '' || allowed.has(value)
+                })
+            )
+            form.value[key] = next
+          }
+        } else if (q.type === 'ratio') {
+          const allowed = new Set((filteredOptions(q, i) || []).map((opt: any) => String(opt.value)))
+          const current = form.value[key]
+          if (current && typeof current === 'object' && !Array.isArray(current)) {
+            const next = Object.fromEntries(
+              Object.entries(current)
+                .map(([optionKey, rawValue]) => [String(optionKey), Number(rawValue)])
+                .filter(([optionKey, numeric]) => allowed.has(optionKey) && Number.isFinite(numeric))
             )
             form.value[key] = next
           }
@@ -1529,6 +1752,10 @@ function safeHtml(raw:string){
   overflow-x: auto;
 }
 
+.matrix-answer--dropdown {
+  overflow-x: visible;
+}
+
 .matrix-answer-table {
   min-width: 420px;
   border: 1px solid #e5e7eb;
@@ -1565,6 +1792,100 @@ function safeHtml(raw:string){
 
 .matrix-answer-cell:last-child {
   border-right: none;
+}
+
+.ratio-answer {
+  width: min(680px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ratio-answer__summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
+  border: 1px solid #dbeafe;
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+.ratio-answer__summary.invalid {
+  background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
+.ratio-answer__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ratio-answer__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.ratio-answer__meta {
+  min-width: 0;
+}
+
+.ratio-answer__label {
+  color: #1f2937;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.ratio-answer__desc {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ratio-answer__control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ratio-answer__suffix {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.matrix-answer-select-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(220px, 1.6fr);
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.matrix-answer-select-row + .matrix-answer-select-row {
+  margin-top: 12px;
+}
+
+.matrix-answer-select-row__label {
+  color: #1f2937;
+  font-weight: 500;
+}
+
+.matrix-answer-select-row__control {
+  width: 100%;
 }
 
 .ranking-answer {

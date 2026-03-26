@@ -525,7 +525,9 @@
                               <div v-for="(row, rowIndex) in ensureMatrixConfig(question).rows" :key="`matrix-row-${rowIndex}`" class="matrix-preview__row">
                                 <span class="matrix-preview__cell matrix-preview__cell--row">{{ row }}</span>
                                 <span v-for="(_, i) in question.options" :key="`matrix-dot-${rowIndex}-${i}`" class="matrix-preview__cell">
-                                  <span class="matrix-preview__dot"></span>
+                                  <span v-if="isMatrixDropdownLegacyQuestion(question.type)" class="matrix-preview__select">请选择</span>
+                                  <span v-else-if="isMatrixMultipleLegacyQuestion(question.type)" class="matrix-preview__check"></span>
+                                  <span v-else class="matrix-preview__dot"></span>
                                 </span>
                               </div>
                             </div>
@@ -1434,16 +1436,18 @@ import { escapeHtml as escapeHtmlUtil, stripHtmlSimple as stripHtmlSimpleUtil, s
 import { generateQuestionId as generateQuestionIdUtil } from '@/utils/uid'
 import { mapLegacyTypeToServer, mapServerTypeToLegacy } from '@/mappers/surveyMappers'
 import {
-  IMPLEMENTED_LEGACY_QUESTION_TYPES,
   getLegacyQuestionConfigPanel,
-  getLegacyQuestionDraftConfig,
-  getLegacyQuestionDefaultOptions,
   getLegacyQuestionTypeLabel,
-  isImplementedLegacyQuestionType,
-  legacyQuestionMatchesServerType,
   legacyQuestionTypeHasOptions
 } from '@/utils/questionTypeRegistry'
 import { buildUploadQuestionHelpText, DEFAULT_UPLOAD_ACCEPT, normalizeUploadQuestionConfig, sanitizeUploadAccept } from '@/utils/uploadQuestion'
+import {
+  buildLegacyQuestionDraft,
+  getImplementedLegacyQuestionNames as getImplementedLegacyQuestionNamesFromEditorModel,
+  getLegacyQuestionEditorConfig,
+  getLegacyQuestionOptionSuffix,
+  isLegacyQuestionOfServerType
+} from '@/utils/questionEditorModel'
 
 const router = useRouter()
 // 问卷说明：改为内联富文本组件，实时写入 surveyForm.description
@@ -1745,55 +1749,30 @@ function showAISuggestion() {
 }
 
 function isMatrixLegacyQuestion(type: number | string): boolean {
-  return legacyQuestionMatchesServerType(type, 'matrix')
+  return isLegacyQuestionOfServerType(type, 'matrix')
 }
 
 function isSliderLegacyQuestion(type: number | string): boolean {
-  return legacyQuestionMatchesServerType(type, 'slider')
+  return isLegacyQuestionOfServerType(type, 'slider')
 }
 
 function isUploadLegacyQuestion(type: number | string): boolean {
-  return legacyQuestionMatchesServerType(type, 'upload')
+  return isLegacyQuestionOfServerType(type, 'upload')
 }
 
 function isRatingLegacyQuestion(type: number | string): boolean {
-  return legacyQuestionMatchesServerType(type, 'rating')
+  return isLegacyQuestionOfServerType(type, 'rating')
 }
 
 function isScaleLegacyQuestion(type: number | string): boolean {
-  return legacyQuestionMatchesServerType(type, 'scale')
+  return isLegacyQuestionOfServerType(type, 'scale')
 }
 
 function buildLegacyQuestion(type: number): Question {
-  const question: Question = {
+  return buildLegacyQuestionDraft(type, {
     id: generateQuestionId(),
-    type,
-    title: '',
-    required: false,
-    options: getLegacyQuestionDefaultOptions(type),
-    optionOrder: 'none',
     hideSystemNumber: areAllNumbersHidden.value
-  }
-
-  const draftConfig = getLegacyQuestionDraftConfig<{
-    validation?: Record<string, unknown>
-    upload?: { maxFiles?: number; maxSizeMb?: number; accept?: string }
-    matrix?: { rows?: string[]; selectionType?: 'single' | 'multiple' }
-  }>(type)
-  if (draftConfig?.validation) {
-    question.validation = { ...draftConfig.validation }
-  }
-  if (draftConfig?.upload) {
-    question.upload = { ...draftConfig.upload }
-  }
-  if (draftConfig?.matrix) {
-    question.matrix = {
-      ...draftConfig.matrix,
-      rows: Array.isArray(draftConfig.matrix.rows) ? [...draftConfig.matrix.rows] : []
-    }
-  }
-
-  return question
+  })
 }
 
 // 批量添加时构建默认题目：遵循“隐藏题号”的全局状态
@@ -2823,10 +2802,7 @@ function goBack() {
 
 // 题型实现状态
 const getQuestionConfig = (type: number) => {
-  return {
-    implemented: isImplementedLegacyQuestionType(type),
-    name: getQuestionTypeLabel(type)
-  }
+  return getLegacyQuestionEditorConfig(type)
 }
 
 function isStandaloneConfigType(type: number): boolean {
@@ -2904,7 +2880,7 @@ function getScalePreviewValues(question: any) {
 
 function ensureMatrixConfig(question: any) {
   question.matrix = question.matrix && typeof question.matrix === 'object' ? question.matrix : {}
-  question.matrix.selectionType = question.matrix.selectionType === 'multiple' ? 'multiple' : 'single'
+  question.matrix.selectionType = Number(question?.type) === 21 ? 'multiple' : 'single'
   if (!Array.isArray(question.matrix.rows) || question.matrix.rows.length === 0) {
     question.matrix.rows = ['服务态度', '响应速度', '专业程度']
   }
@@ -2913,6 +2889,14 @@ function ensureMatrixConfig(question: any) {
     return String(row?.label ?? row?.text ?? `维度${index + 1}`)
   })
   return question.matrix as { rows: string[]; selectionType: 'single' | 'multiple' }
+}
+
+function isMatrixMultipleLegacyQuestion(type: number | string) {
+  return Number(type) === 21
+}
+
+function isMatrixDropdownLegacyQuestion(type: number | string) {
+  return Number(type) === 24
 }
 
 function addMatrixRow(question: any) {
@@ -2948,10 +2932,7 @@ function uploadConfigSummary(question: any) {
 }
 
 function getImplementedQuestionNames() {
-  return Array.from(IMPLEMENTED_LEGACY_QUESTION_TYPES)
-    .sort((a, b) => a - b)
-    .map(type => `• ${getLegacyQuestionTypeLabel(type)}`)
-    .join('\n')
+  return getImplementedLegacyQuestionNamesFromEditorModel()
 }
 
 // 通过题型添加问题
@@ -2967,12 +2948,7 @@ const addQuestionByType = (type: number) => {
     return
   }
   
-  const defaultOptions = getLegacyQuestionDefaultOptions(type)
-  
-  const question: Question = {
-    ...buildLegacyQuestion(type),
-    options: defaultOptions
-  }
+  const question: Question = buildLegacyQuestion(type)
   
   surveyForm.questions.push(question)
   
@@ -2987,9 +2963,7 @@ const hasOptions = (type: number): boolean => {
 
 // 获取选项标签
 const getOptionLabel = (type: number, index: number): string => {
-  if (type === 3) return String.fromCharCode(65 + index) // A, B, C...
-  if (type === 4) return String.fromCharCode(65 + index) // A, B, C...
-  return `${index + 1}`
+  return getLegacyQuestionOptionSuffix(type, index)
 }
 
 // 选项编辑（模板引用）
@@ -3245,7 +3219,7 @@ const toServerPayload = () => {
     if ((q as any).validation && typeof (q as any).validation === 'object') {
       base.validation = { ...(q as any).validation }
     }
-    const isOptionType = ['radio','checkbox','ranking', 'matrix'].includes(base.type)
+    const isOptionType = ['radio','checkbox','ranking', 'matrix', 'ratio'].includes(base.type)
     if (isOptionType) {
       base.options = (q.options || []).map((label, i) => {
         const extra:any = (q as any).optionExtras?.[i] || {}
@@ -4891,6 +4865,28 @@ function safeHtml(raw: string): string { return safeHtmlUtil(raw) }
   border-radius: 999px;
   border: 1.5px solid #cbd5e1;
   background: #fff;
+}
+
+.matrix-preview__check {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  border-radius: 4px;
+  border: 1.5px solid #cbd5e1;
+  background: #fff;
+}
+
+.matrix-preview__select {
+  min-width: 56px;
+  padding: 4px 8px;
+  display: inline-flex;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid #dbe3f0;
+  background: #fff;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 /* 预览区域样式已迁移至独立预览页 */

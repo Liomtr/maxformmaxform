@@ -1,6 +1,7 @@
 import config from '../config/index.js'
 import {
   LEGACY_TO_SERVER_TYPE_MAP,
+  getServerQuestionSubmissionKind,
   mapLegacyTypeToServer,
   normalizeServerQuestionType,
   serverQuestionTypeHasOptions,
@@ -62,6 +63,31 @@ function normalizeMatrixRows(rows = []) {
       order: index + 1
     }
   })
+}
+
+function toRoundedRatioValue(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return null
+  return Number(numeric.toFixed(2))
+}
+
+function normalizeRatioAnswerEntries(value, optionValues) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+
+  const entries = Object.entries(value)
+  const normalized = []
+  for (const [optionKey, raw] of entries) {
+    if (!optionValues.has(String(optionKey))) return { error: 'invalid_option' }
+    if (raw === '' || raw == null) continue
+
+    const numeric = toRoundedRatioValue(raw)
+    if (numeric == null) return { error: 'invalid_number' }
+    if (numeric < 0 || numeric > 100) return { error: 'invalid_range' }
+
+    normalized.push([String(optionKey), numeric])
+  }
+
+  return { entries: normalized }
 }
 
 function toPositiveInt(value, fallback, max = Number.POSITIVE_INFINITY) {
@@ -233,15 +259,17 @@ export function validateSubmissionAnswers(questions, answers) {
     if (!question || seen.has(order)) continue
 
     const value = item?.value
+    let normalizedValue = value
     const optionValues = new Set((question.options || []).map(option => String(option.value)))
+    const submissionKind = getServerQuestionSubmissionKind(question.type)
 
-    if (question.type === 'radio') {
+    if (submissionKind === 'single_option') {
       if (value != null && value !== '' && optionValues.size > 0 && !optionValues.has(String(value))) {
         return { normalizedAnswers: [], error: `Question ${order} contains an invalid option` }
       }
     }
 
-    if (question.type === 'checkbox' || question.type === 'ranking') {
+    if (submissionKind === 'multi_option') {
       if (value != null && !Array.isArray(value)) {
         return { normalizedAnswers: [], error: `Question ${order} must be an array` }
       }
@@ -253,22 +281,24 @@ export function validateSubmissionAnswers(questions, answers) {
       }
     }
 
-    if (question.type === 'upload' && value != null && !Array.isArray(value)) {
-      return { normalizedAnswers: [], error: `Question ${order} must be an array` }
-    }
+    if (submissionKind === 'file_list') {
+      if (value != null && !Array.isArray(value)) {
+        return { normalizedAnswers: [], error: `Question ${order} must be an array` }
+      }
 
-    if (question.type === 'upload' && Array.isArray(value)) {
-      const uploadError = validateUploadFilesAgainstQuestion(question, value, { enforceCount: true })
-      if (uploadError) {
-        return { normalizedAnswers: [], error: `Question ${order} ${uploadError}` }
+      if (Array.isArray(value)) {
+        const uploadConfig = normalizeUploadQuestionConfig(question)
+        if (value.length > uploadConfig.maxFiles) {
+          return { normalizedAnswers: [], error: `Question ${order} allows at most ${uploadConfig.maxFiles} files` }
+        }
       }
     }
 
-    if (question.type === 'slider' && value != null && value !== '' && Number.isNaN(Number(value))) {
+    if (submissionKind === 'numeric' && value != null && value !== '' && Number.isNaN(Number(value))) {
       return { normalizedAnswers: [], error: `Question ${order} must be numeric` }
     }
 
-    if ((question.type === 'rating' || question.type === 'scale') && value != null && value !== '') {
+    if (submissionKind === 'bounded_numeric' && value != null && value !== '') {
       const numericValue = Number(value)
       const min = Number(question?.validation?.min)
       const max = Number(question?.validation?.max)
@@ -283,17 +313,34 @@ export function validateSubmissionAnswers(questions, answers) {
       }
     }
 
-    if (question.type === 'matrix' && value != null) {
+    if (submissionKind === 'matrix' && value != null) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return { normalizedAnswers: [], error: `Question ${order} must be an object` }
       }
 
       const rowValues = new Set((question?.matrix?.rows || []).map(row => String(row.value)))
       const answerEntries = Object.entries(value)
+      const isMultipleMatrix = question?.matrix?.selectionType === 'multiple'
 
       for (const [rowKey, answerValue] of answerEntries) {
         if (!rowValues.has(String(rowKey))) {
           return { normalizedAnswers: [], error: `Question ${order} contains an invalid row` }
+        }
+
+        if (isMultipleMatrix) {
+          if (answerValue == null) continue
+          if (!Array.isArray(answerValue)) {
+            return { normalizedAnswers: [], error: `Question ${order} row ${rowKey} must be an array` }
+          }
+          const invalid = answerValue.some(option => !optionValues.has(String(option)))
+          if (invalid) {
+            return { normalizedAnswers: [], error: `Question ${order} contains an invalid option` }
+          }
+          continue
+        }
+
+        if (Array.isArray(answerValue)) {
+          return { normalizedAnswers: [], error: `Question ${order} row ${rowKey} must be a single value` }
         }
         if (answerValue != null && answerValue !== '' && optionValues.size > 0 && !optionValues.has(String(answerValue))) {
           return { normalizedAnswers: [], error: `Question ${order} contains an invalid option` }
@@ -301,16 +348,53 @@ export function validateSubmissionAnswers(questions, answers) {
       }
     }
 
+    if (submissionKind === 'ratio' && value != null) {
+      const normalizedRatio = normalizeRatioAnswerEntries(value, optionValues)
+      if (!normalizedRatio) {
+        return { normalizedAnswers: [], error: `Question ${order} must be an object` }
+      }
+      if (normalizedRatio.error === 'invalid_option') {
+        return { normalizedAnswers: [], error: `Question ${order} contains an invalid option` }
+      }
+      if (normalizedRatio.error === 'invalid_number') {
+        return { normalizedAnswers: [], error: `Question ${order} must be numeric` }
+      }
+      if (normalizedRatio.error === 'invalid_range') {
+        return { normalizedAnswers: [], error: `Question ${order} must stay between 0 and 100` }
+      }
+
+      const total = normalizedRatio.entries.reduce((sum, [, numeric]) => sum + numeric, 0)
+      const hasValue = normalizedRatio.entries.length > 0
+
+      if (hasValue && Math.abs(total - 100) > 0.01) {
+        return { normalizedAnswers: [], error: `Question ${order} must total 100` }
+      }
+
+      normalizedValue = Object.fromEntries(normalizedRatio.entries)
+    }
+
     if (question.required) {
       const empty = question.type === 'matrix'
         ? (() => {
             const rows = Array.isArray(question?.matrix?.rows) ? question.matrix.rows : []
+            const isMultipleMatrix = question?.matrix?.selectionType === 'multiple'
             if (!value || typeof value !== 'object' || Array.isArray(value)) return true
             return rows.some(row => {
               const rowValue = value[String(row.value)]
+              if (isMultipleMatrix) {
+                return !Array.isArray(rowValue) || rowValue.length === 0
+              }
               return rowValue == null || String(rowValue).trim() === ''
             })
           })()
+        : question.type === 'ratio'
+          ? (() => {
+              const normalizedRatio = normalizeRatioAnswerEntries(value, optionValues)
+              if (!normalizedRatio || normalizedRatio.error) return true
+              if (normalizedRatio.entries.length === 0) return true
+              const total = normalizedRatio.entries.reduce((sum, [, numeric]) => sum + numeric, 0)
+              return Math.abs(total - 100) > 0.01
+            })()
         : (Array.isArray(value) ? value.length === 0 : value == null || String(value).trim() === '')
       if (empty) {
         return { normalizedAnswers: [], error: `Question ${order} is required` }
@@ -320,7 +404,7 @@ export function validateSubmissionAnswers(questions, answers) {
     normalizedAnswers.push({
       questionId: order,
       questionType: question.type,
-      value
+      value: normalizedValue
     })
     seen.add(order)
   }

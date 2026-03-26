@@ -17,9 +17,22 @@ http.interceptors.request.use(config => {
 
 http.interceptors.response.use(
   res => res,
-  err => {
+  async err => {
     const status = err?.response?.status
-    const errorData = err?.response?.data?.error
+    let errorData = err?.response?.data?.error
+
+    if (!errorData && err?.response?.data instanceof Blob) {
+      try {
+        const text = await err.response.data.text()
+        const parsed = JSON.parse(text)
+        errorData = parsed?.error
+        if (parsed && err.response) {
+          err.response.data = parsed
+        }
+      } catch {
+        errorData = undefined
+      }
+    }
 
     if (status === 401) {
       const code = errorData?.code

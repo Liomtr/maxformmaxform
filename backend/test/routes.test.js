@@ -36,12 +36,15 @@ const originalMessageCreate = Message.create
 const originalSurveyMethods = {
   findById: Survey.findById,
   findByIdentifier: Survey.findByIdentifier,
+  incrementResponseCount: Survey.incrementResponseCount,
   softDelete: Survey.softDelete,
   listTrash: Survey.listTrash,
   listTrashIds: Survey.listTrashIds,
   clearTrash: Survey.clearTrash
 }
 const originalAnswerMethods = {
+  create: Answer.create,
+  countByIp: Answer.countByIp,
   deleteBySurveyIds: Answer.deleteBySurveyIds,
   findBySurveyId: Answer.findBySurveyId
 }
@@ -144,10 +147,13 @@ afterEach(() => {
 
   Survey.findByIdentifier = originalSurveyMethods.findByIdentifier
   Survey.findById = originalSurveyMethods.findById
+  Survey.incrementResponseCount = originalSurveyMethods.incrementResponseCount
   Survey.softDelete = originalSurveyMethods.softDelete
   Survey.listTrash = originalSurveyMethods.listTrash
   Survey.listTrashIds = originalSurveyMethods.listTrashIds
   Survey.clearTrash = originalSurveyMethods.clearTrash
+  Answer.create = originalAnswerMethods.create
+  Answer.countByIp = originalAnswerMethods.countByIp
   Answer.deleteBySurveyIds = originalAnswerMethods.deleteBySurveyIds
   Answer.findBySurveyId = originalAnswerMethods.findBySurveyId
   FileModel.create = originalFileMethods.create
@@ -332,6 +338,26 @@ test('GET /api/surveys/:id/results returns question level statistics', async () 
           rows: [{ label: '服务态度', value: '1' }, { label: '响应速度', value: '2' }]
         }
       },
+      {
+        type: 'matrix',
+        title: '矩阵多选题',
+        options: [{ label: '熟悉', value: '1' }, { label: '可独立完成', value: '2' }, { label: '需支持', value: '3' }],
+        matrix: {
+          selectionType: 'multiple',
+          rows: [{ label: '产品知识', value: '1' }, { label: '系统操作', value: '2' }]
+        }
+      },
+      {
+        type: 'matrix',
+        uiType: 24,
+        title: '矩阵下拉题',
+        options: [{ label: '高', value: '1' }, { label: '中', value: '2' }, { label: '低', value: '3' }],
+        matrix: {
+          selectionType: 'single',
+          rows: [{ label: '交付质量', value: '1' }, { label: '协作效率', value: '2' }]
+        }
+      },
+      { type: 'ratio', title: '比重题', options: [{ label: '品牌', value: '1' }, { label: '售价', value: '2' }, { label: '服务', value: '3' }] },
       { type: 'ranking', title: '排序题', options: [{ label: '甲', value: 'x' }, { label: '乙', value: 'y' }] },
       { type: 'upload', title: '上传题' },
       { type: 'date', title: '日期题' }
@@ -353,9 +379,12 @@ test('GET /api/surveys/:id/results returns question level statistics', async () 
         { questionId: 5, questionType: 'rating', value: 5 },
         { questionId: 6, questionType: 'scale', value: 9 },
         { questionId: 7, questionType: 'matrix', value: { 1: '1', 2: '2' } },
-        { questionId: 8, questionType: 'ranking', value: ['x', 'y'] },
-        { questionId: 9, questionType: 'upload', value: [{ id: 101, name: 'a.pdf', url: '/uploads/a.pdf', size: 123, type: 'application/pdf' }] },
-        { questionId: 10, questionType: 'date', value: '2026-03-20' }
+        { questionId: 8, questionType: 'matrix', value: { 1: ['1', '2'], 2: ['2'] } },
+        { questionId: 9, questionType: 'matrix', value: { 1: '1', 2: '2' } },
+        { questionId: 10, questionType: 'ratio', value: { 1: 50, 2: 30, 3: 20 } },
+        { questionId: 11, questionType: 'ranking', value: ['x', 'y'] },
+        { questionId: 12, questionType: 'upload', value: [{ id: 101, name: 'a.pdf', url: '/uploads/a.pdf', size: 123, type: 'application/pdf' }] },
+        { questionId: 13, questionType: 'date', value: '2026-03-20' }
       ]
     },
     {
@@ -372,16 +401,19 @@ test('GET /api/surveys/:id/results returns question level statistics', async () 
         { questionId: 5, questionType: 'rating', value: 3 },
         { questionId: 6, questionType: 'scale', value: 7 },
         { questionId: 7, questionType: 'matrix', value: { 1: '2', 2: '1' } },
-        { questionId: 8, questionType: 'ranking', value: ['y', 'x'] },
+        { questionId: 8, questionType: 'matrix', value: { 1: ['2'], 2: ['1', '3'] } },
+        { questionId: 9, questionType: 'matrix', value: { 1: '2', 2: '1' } },
+        { questionId: 10, questionType: 'ratio', value: { 1: 40, 2: 40, 3: 20 } },
+        { questionId: 11, questionType: 'ranking', value: ['y', 'x'] },
         {
-          questionId: 9,
+          questionId: 12,
           questionType: 'upload',
           value: [
             { id: 102, name: 'b.pdf', url: '/uploads/b.pdf', size: 456, type: 'application/pdf' },
             { id: 103, name: 'c.pdf', url: '/uploads/c.pdf', size: 789, type: 'application/pdf' }
           ]
         },
-        { questionId: 10, questionType: 'date', value: '2026-03-22' }
+        { questionId: 13, questionType: 'date', value: '2026-03-22' }
       ]
     }
   ])
@@ -397,7 +429,7 @@ test('GET /api/surveys/:id/results returns question level statistics', async () 
   assert.equal(json.data.incomplete, 1)
   assert.equal(json.data.completionRate, 50)
   assert.ok(Array.isArray(json.data.questionStats))
-  assert.equal(json.data.questionStats.length, 10)
+  assert.equal(json.data.questionStats.length, 13)
   assert.deepEqual(json.data.systemStats.devices, [
     { label: 'Desktop', value: '1' },
     { label: 'Mobile', value: '1' }
@@ -453,16 +485,37 @@ test('GET /api/surveys/:id/results returns question level statistics', async () 
   assert.equal(matrixStat.rows[1].options[0].count, 1)
   assert.equal(matrixStat.rows[1].options[1].count, 1)
 
-  const rankingStat = json.data.questionStats.find(item => item.questionId === 8)
+  const matrixMultiStat = json.data.questionStats.find(item => item.questionId === 8)
+  assert.equal(matrixMultiStat.matrixMode, 'multiple')
+  assert.equal(matrixMultiStat.rows[0].options[0].count, 1)
+  assert.equal(matrixMultiStat.rows[0].options[1].count, 2)
+  assert.equal(matrixMultiStat.rows[1].options[0].count, 1)
+  assert.equal(matrixMultiStat.rows[1].options[1].count, 1)
+  assert.equal(matrixMultiStat.rows[1].options[2].count, 1)
+
+  const matrixDropdownStat = json.data.questionStats.find(item => item.questionId === 9)
+  assert.equal(matrixDropdownStat.matrixMode, 'single')
+  assert.equal(matrixDropdownStat.rows[0].options[0].count, 1)
+  assert.equal(matrixDropdownStat.rows[0].options[1].count, 1)
+  assert.equal(matrixDropdownStat.rows[1].options[0].count, 1)
+  assert.equal(matrixDropdownStat.rows[1].options[1].count, 1)
+
+  const ratioStat = json.data.questionStats.find(item => item.questionId === 10)
+  assert.equal(ratioStat.options[0].avgShare, 45)
+  assert.equal(ratioStat.options[1].avgShare, 35)
+  assert.equal(ratioStat.options[2].avgShare, 20)
+  assert.equal(ratioStat.options[0].count, 2)
+
+  const rankingStat = json.data.questionStats.find(item => item.questionId === 11)
   assert.equal(rankingStat.options[0].avgRank, 1.5)
   assert.equal(rankingStat.options[1].avgRank, 1.5)
 
-  const uploadStat = json.data.questionStats.find(item => item.questionId === 9)
+  const uploadStat = json.data.questionStats.find(item => item.questionId === 12)
   assert.equal(uploadStat.totalAnswers, 2)
   assert.equal(uploadStat.totalFiles, 3)
   assert.equal(uploadStat.sampleFiles.length, 3)
 
-  const dateStat = json.data.questionStats.find(item => item.questionId === 10)
+  const dateStat = json.data.questionStats.find(item => item.questionId === 13)
   assert.equal(dateStat.earliestDate, '2026-03-20')
   assert.equal(dateStat.latestDate, '2026-03-22')
 })
@@ -665,6 +718,197 @@ test('POST /api/surveys/:id/responses rejects upload answers with invalid upload
   assert.equal(response.status, 400)
   assert.equal(json.success, false)
   assert.equal(json.error.code, 'VALIDATION')
+})
+
+test('POST /api/surveys/:id/responses accepts matrix multiple and dropdown answers', async () => {
+  let createdPayload = null
+
+  Survey.findByIdentifier = async () => ({
+    id: 44,
+    creator_id: 1,
+    title: 'Matrix Submission Survey',
+    status: 'published',
+    settings: {},
+    questions: [
+      {
+        type: 'matrix',
+        title: '矩阵多选',
+        required: true,
+        order: 1,
+        options: [{ label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' }],
+        matrix: {
+          selectionType: 'multiple',
+          rows: [{ label: '能力一', value: '1' }, { label: '能力二', value: '2' }]
+        }
+      },
+      {
+        type: 'matrix',
+        uiType: 24,
+        title: '矩阵下拉',
+        required: true,
+        order: 2,
+        options: [{ label: '高', value: '1' }, { label: '中', value: '2' }],
+        matrix: {
+          selectionType: 'single',
+          rows: [{ label: '质量', value: '1' }]
+        }
+      }
+    ]
+  })
+  Answer.countByIp = async () => 0
+  Answer.create = async payload => {
+    createdPayload = payload
+    return { id: 601, ...payload }
+  }
+  Survey.incrementResponseCount = async () => 1
+  Message.create = async () => ({ id: 1 })
+
+  const { response, json } = await requestPublic('/surveys/44/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      answers: [
+        { questionId: 1, value: { 1: ['1', '2'], 2: ['3'] } },
+        { questionId: 2, value: { 1: '2' } }
+      ]
+    })
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.deepEqual(createdPayload?.answers_data, [
+    { questionId: 1, questionType: 'matrix', value: { 1: ['1', '2'], 2: ['3'] } },
+    { questionId: 2, questionType: 'matrix', value: { 1: '2' } }
+  ])
+})
+
+test('POST /api/surveys/:id/responses accepts ratio answers totaling 100', async () => {
+  let createdPayload = null
+
+  Survey.findByIdentifier = async () => ({
+    id: 45,
+    creator_id: 1,
+    title: 'Ratio Submission Survey',
+    status: 'published',
+    settings: {},
+    questions: [
+      {
+        type: 'ratio',
+        title: '比重题',
+        required: true,
+        order: 1,
+        options: [{ label: '品牌', value: '1' }, { label: '价格', value: '2' }, { label: '服务', value: '3' }]
+      }
+    ]
+  })
+  Answer.countByIp = async () => 0
+  Answer.create = async payload => {
+    createdPayload = payload
+    return { id: 602, ...payload }
+  }
+  Survey.incrementResponseCount = async () => 1
+  Message.create = async () => ({ id: 1 })
+
+  const { response, json } = await requestPublic('/surveys/45/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      answers: [
+        { questionId: 1, value: { 1: 40, 2: 35, 3: 25 } }
+      ]
+    })
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.deepEqual(createdPayload?.answers_data, [
+    { questionId: 1, questionType: 'ratio', value: { 1: 40, 2: 35, 3: 25 } }
+  ])
+})
+
+test('POST /api/surveys/:id/responses accepts upload answers with minimal file references', async () => {
+  let createdPayload = null
+  let attachedIds = null
+  let incrementedSurveyId = null
+  let systemMessageCreated = false
+
+  Survey.findByIdentifier = async () => ({
+    id: 40,
+    creator_id: 1,
+    title: 'Upload Answer Survey',
+    status: 'published',
+    settings: {},
+    questions: [{
+      type: 'upload',
+      title: '闄勪欢',
+      required: true,
+      order: 1,
+      upload: { maxFiles: 1, maxSizeMb: 10, accept: '.pdf' }
+    }]
+  })
+  FileModel.findByIds = async () => ([
+    {
+      id: 9000,
+      survey_id: 40,
+      question_order: 1,
+      submission_token: 'session-40',
+      public_token: 'token-40',
+      name: 'ok.pdf',
+      url: '/uploads/ok.pdf',
+      size: 123,
+      type: 'application/pdf'
+    }
+  ])
+  Answer.countByIp = async () => 0
+  Answer.create = async payload => {
+    createdPayload = payload
+    return { id: 501, ...payload }
+  }
+  FileModel.attachToAnswer = async (ids, answerId) => {
+    attachedIds = { ids, answerId }
+    return ids.length
+  }
+  Survey.incrementResponseCount = async id => {
+    incrementedSurveyId = id
+  }
+  Message.create = async () => {
+    systemMessageCreated = true
+    return { id: 1 }
+  }
+
+  const { response, json } = await requestPublic('/surveys/40/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      clientSubmissionToken: 'session-40',
+      answers: [
+        {
+          questionId: 1,
+          value: [{ id: 9000, uploadToken: 'token-40' }]
+        }
+      ]
+    })
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.equal(json.data.id, 501)
+  assert.deepEqual(createdPayload?.answers_data, [
+    {
+      questionId: 1,
+      questionType: 'upload',
+      value: [{
+        id: 9000,
+        name: 'ok.pdf',
+        url: '/uploads/ok.pdf',
+        size: 123,
+        type: 'application/pdf'
+      }]
+    }
+  ])
+  assert.deepEqual(attachedIds, { ids: [9000], answerId: 501 })
+  assert.equal(incrementedSurveyId, 40)
+  assert.equal(systemMessageCreated, true)
 })
 
 test('POST /api/surveys/:id/responses rejects upload answers beyond the configured maxFiles', async () => {

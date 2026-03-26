@@ -17,7 +17,7 @@ import {
 } from '../utils/questionSchema.js'
 import { buildUploadedFileUrl, removeUploadedFile, upload } from '../utils/uploadStorage.js'
 import config from '../config/index.js'
-import { getQuestionRenderType } from '../../../shared/questionTypeRegistry.js'
+import { buildQuestionStats as buildSharedQuestionStats } from '../../../shared/questionModel.js'
 
 const router = Router()
 const publicUploadLimiter = rateLimit({
@@ -236,14 +236,6 @@ function getUploadQuestionByQuestionId(survey, questionId) {
   return question?.type === 'upload' ? question : null
 }
 
-function isAnsweredValue(value) {
-  if (Array.isArray(value)) return value.length > 0
-  if (value == null) return false
-  if (typeof value === 'string') return value.trim() !== ''
-  if (typeof value === 'object') return Object.keys(value).length > 0
-  return true
-}
-
 function toFiniteNumber(value) {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : null
@@ -253,23 +245,6 @@ function toRoundedAverage(values, digits = 2) {
   if (!Array.isArray(values) || values.length === 0) return null
   const total = values.reduce((sum, value) => sum + value, 0)
   return Number((total / values.length).toFixed(digits))
-}
-
-function buildNumericDistribution(values) {
-  if (!Array.isArray(values) || values.length === 0) return {}
-
-  const counts = new Map()
-  values.forEach(value => {
-    const key = Number(value)
-    counts.set(key, (counts.get(key) || 0) + 1)
-  })
-
-  const total = values.length
-  return Object.fromEntries(
-    Array.from(counts.entries())
-      .sort((a, b) => b[0] - a[0])
-      .map(([score, count]) => [String(score), Number(((count / total) * 100).toFixed(2))])
-  )
 }
 
 function formatDuration(seconds) {
@@ -284,189 +259,6 @@ function formatDuration(seconds) {
   if (hours > 0) return `${hours}h ${minutes}m ${secs}s`
   if (minutes > 0) return `${minutes}m ${secs}s`
   return `${secs}s`
-}
-
-function buildQuestionStats(survey, submissions) {
-  const questions = normalizeSurveyQuestions(survey?.questions || [])
-  const answersByQuestionId = new Map()
-
-  for (const submission of submissions) {
-    const items = Array.isArray(submission?.answers_data) ? submission.answers_data : []
-    for (const item of items) {
-      const questionId = Number(item?.questionId)
-      if (!Number.isFinite(questionId) || questionId < 1) continue
-      if (!answersByQuestionId.has(questionId)) answersByQuestionId.set(questionId, [])
-      answersByQuestionId.get(questionId).push(item)
-    }
-  }
-
-  return questions.flatMap((question, index) => {
-    if (getQuestionRenderType(question) === 'stage_explain') return []
-
-    const questionId = index + 1
-    const answerItems = answersByQuestionId.get(questionId) || []
-    const answeredItems = answerItems.filter(item => isAnsweredValue(item?.value))
-    const base = {
-      questionId,
-      questionTitle: String(question?.title || `Question ${questionId}`),
-      type: String(question?.type || 'input'),
-      totalAnswers: answeredItems.length
-    }
-
-    if (question.type === 'radio' || question.type === 'checkbox') {
-      const options = Array.isArray(question.options) ? question.options : []
-      const answeredCount = answeredItems.length
-      return [{
-        ...base,
-        options: options.map(option => {
-          const count = answeredItems.reduce((sum, item) => {
-            const value = item?.value
-            if (question.type === 'checkbox') {
-              return sum + (Array.isArray(value) && value.map(String).includes(String(option.value)) ? 1 : 0)
-            }
-            return sum + (String(value) === String(option.value) ? 1 : 0)
-          }, 0)
-
-          return {
-            label: String(option.label || option.value || ''),
-            value: String(option.value || ''),
-            count,
-            percentage: answeredCount > 0 ? Number(((count / answeredCount) * 100).toFixed(2)) : 0
-          }
-        })
-      }]
-    }
-
-    if (question.type === 'input' || question.type === 'textarea') {
-      const values = answeredItems
-        .map(item => String(item.value).trim())
-        .filter(Boolean)
-
-      return [{
-        ...base,
-        sampleAnswers: Array.from(new Set(values)).slice(0, 5)
-      }]
-    }
-
-    if (question.type === 'slider') {
-      const values = answeredItems
-        .map(item => toFiniteNumber(item.value))
-        .filter(value => value != null)
-
-      return [{
-        ...base,
-        avgValue: toRoundedAverage(values),
-        minValue: values.length > 0 ? Math.min(...values) : null,
-        maxValue: values.length > 0 ? Math.max(...values) : null
-      }]
-    }
-
-    if (question.type === 'rating' || question.type === 'scale') {
-      const values = answeredItems
-        .map(item => toFiniteNumber(item.value))
-        .filter(value => value != null)
-
-      return [{
-        ...base,
-        avgScore: toRoundedAverage(values),
-        distribution: buildNumericDistribution(values)
-      }]
-    }
-
-    if (question.type === 'matrix') {
-      const options = Array.isArray(question.options) ? question.options : []
-      const rows = Array.isArray(question?.matrix?.rows) ? question.matrix.rows : []
-
-      return [{
-        ...base,
-        matrixMode: question?.matrix?.selectionType || 'single',
-        rows: rows.map(row => {
-          const rowValue = String(row?.value || '')
-          const rowAnsweredItems = answeredItems.filter(item => {
-            const answer = item?.value
-            return answer && typeof answer === 'object' && !Array.isArray(answer) && answer[rowValue] != null && String(answer[rowValue]).trim() !== ''
-          })
-
-          return {
-            label: String(row?.label || rowValue),
-            value: rowValue,
-            totalAnswers: rowAnsweredItems.length,
-            options: options.map(option => {
-              const count = rowAnsweredItems.reduce((sum, item) => {
-                return sum + (String(item.value?.[rowValue]) === String(option.value) ? 1 : 0)
-              }, 0)
-
-              return {
-                label: String(option.label || option.value || ''),
-                value: String(option.value || ''),
-                count,
-                percentage: rowAnsweredItems.length > 0 ? Number(((count / rowAnsweredItems.length) * 100).toFixed(2)) : 0
-              }
-            })
-          }
-        })
-      }]
-    }
-
-    if (question.type === 'ranking') {
-      const options = Array.isArray(question.options) ? question.options : []
-      const answeredCount = answeredItems.length
-      return [{
-        ...base,
-        options: options.map(option => {
-          const positions = answeredItems.flatMap(item => {
-            const value = Array.isArray(item?.value) ? item.value.map(String) : []
-            const indexInAnswer = value.indexOf(String(option.value))
-            return indexInAnswer >= 0 ? [indexInAnswer + 1] : []
-          })
-
-          const count = positions.length
-          return {
-            label: String(option.label || option.value || ''),
-            value: String(option.value || ''),
-            count,
-            percentage: answeredCount > 0 ? Number(((count / answeredCount) * 100).toFixed(2)) : 0,
-            avgRank: toRoundedAverage(positions)
-          }
-        })
-      }]
-    }
-
-    if (question.type === 'upload') {
-      const fileLists = answeredItems
-        .map(item => Array.isArray(item?.value) ? item.value : [])
-        .filter(list => list.length > 0)
-      const files = fileLists.flat()
-
-      return [{
-        ...base,
-        totalFiles: files.length,
-        sampleFiles: files.slice(0, 5).map(file => ({
-          id: Number(file?.id || 0),
-          name: String(file?.name || ''),
-          url: String(file?.url || ''),
-          type: String(file?.type || ''),
-          size: Number(file?.size || 0)
-        }))
-      }]
-    }
-
-    if (question.type === 'date') {
-      const values = answeredItems
-        .map(item => String(item.value || '').trim())
-        .filter(Boolean)
-        .sort()
-
-      return [{
-        ...base,
-        sampleAnswers: Array.from(new Set(values)).slice(0, 5),
-        earliestDate: values[0] || null,
-        latestDate: values[values.length - 1] || null
-      }]
-    }
-
-    return [base]
-  })
 }
 
 function buildResultsSummary(submissions) {
@@ -1012,7 +804,7 @@ router.get('/:id/results', authRequired, async (req, res, next) => {
 
     const submissions = await Answer.findBySurveyId(survey.id)
     const summary = buildResultsSummary(submissions)
-    const questionStats = buildQuestionStats(survey, submissions)
+    const questionStats = buildSharedQuestionStats(normalizeSurveyQuestions(survey?.questions || []), submissions)
 
     res.json({
       success: true,

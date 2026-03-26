@@ -34,8 +34,9 @@ export type ServerQuestionType =
   | 'rating'
   | 'scale'
   | 'matrix'
+  | 'ratio'
 
-export type QuestionAnalyticsKind = 'choice' | 'text' | 'metric' | 'files' | 'rating' | 'matrix' | 'other'
+export type QuestionAnalyticsKind = 'choice' | 'text' | 'metric' | 'files' | 'rating' | 'matrix' | 'ratio' | 'other'
 export type LegacyQuestionConfigPanel = 'default' | 'standalone' | 'matrix'
 
 type QuestionWithUiType = Pick<Question, 'type'> & { uiType?: number | string }

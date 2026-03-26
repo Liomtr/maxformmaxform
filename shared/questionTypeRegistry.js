@@ -1,15 +1,16 @@
 const SERVER_QUESTION_TYPE_DEFINITIONS = [
-  { type: 'input', label: '填空题', hasOptions: false, analyticsKind: 'text' },
-  { type: 'textarea', label: '简答题', hasOptions: false, analyticsKind: 'text' },
-  { type: 'radio', label: '单选题', hasOptions: true, analyticsKind: 'choice' },
-  { type: 'checkbox', label: '多选题', hasOptions: true, analyticsKind: 'choice' },
-  { type: 'date', label: '日期题', hasOptions: false, analyticsKind: 'text' },
-  { type: 'slider', label: '滑动条题', hasOptions: false, analyticsKind: 'metric' },
-  { type: 'ranking', label: '排序题', hasOptions: true, analyticsKind: 'choice' },
-  { type: 'upload', label: '文件上传题', hasOptions: false, analyticsKind: 'files' },
-  { type: 'rating', label: '评分题', hasOptions: false, analyticsKind: 'rating' },
-  { type: 'scale', label: '量表题', hasOptions: false, analyticsKind: 'rating' },
-  { type: 'matrix', label: '矩阵题', hasOptions: false, analyticsKind: 'matrix' }
+  { type: 'input', label: '填空题', hasOptions: false, analyticsKind: 'text', submissionKind: 'text' },
+  { type: 'textarea', label: '简答题', hasOptions: false, analyticsKind: 'text', submissionKind: 'text' },
+  { type: 'radio', label: '单选题', hasOptions: true, analyticsKind: 'choice', submissionKind: 'single_option' },
+  { type: 'checkbox', label: '多选题', hasOptions: true, analyticsKind: 'choice', submissionKind: 'multi_option' },
+  { type: 'date', label: '日期题', hasOptions: false, analyticsKind: 'text', submissionKind: 'text' },
+  { type: 'slider', label: '滑动条题', hasOptions: false, analyticsKind: 'metric', submissionKind: 'numeric' },
+  { type: 'ranking', label: '排序题', hasOptions: true, analyticsKind: 'choice', submissionKind: 'multi_option' },
+  { type: 'upload', label: '文件上传题', hasOptions: false, analyticsKind: 'files', submissionKind: 'file_list' },
+  { type: 'rating', label: '评分题', hasOptions: false, analyticsKind: 'rating', submissionKind: 'bounded_numeric' },
+  { type: 'scale', label: '量表题', hasOptions: false, analyticsKind: 'rating', submissionKind: 'bounded_numeric' },
+  { type: 'matrix', label: '矩阵题', hasOptions: false, analyticsKind: 'matrix', submissionKind: 'matrix' },
+  { type: 'ratio', label: '比重题', hasOptions: true, analyticsKind: 'ratio', submissionKind: 'ratio' }
 ]
 
 const LEGACY_QUESTION_TYPE_DEFINITIONS = [
@@ -50,11 +51,30 @@ const LEGACY_QUESTION_TYPE_DEFINITIONS = [
     configPanel: 'matrix',
     draft: { matrix: { rows: ['服务态度', '响应速度', '专业程度'], selectionType: 'single' } }
   },
-  { legacyType: 21, label: '矩阵多选', implemented: false, hasOptions: true, defaultOptions: ['非常满意', '满意', '一般', '不满意', '非常不满意'] },
-  { legacyType: 24, label: '矩阵下拉', implemented: false, hasOptions: true },
+  {
+    legacyType: 21,
+    label: '矩阵多选',
+    serverType: 'matrix',
+    implemented: true,
+    hasOptions: true,
+    defaultOptions: ['非常满意', '满意', '一般', '不满意', '非常不满意'],
+    configPanel: 'matrix',
+    draft: { matrix: { rows: ['服务态度', '响应速度', '专业程度'], selectionType: 'multiple' } }
+  },
+  {
+    legacyType: 24,
+    label: '矩阵下拉',
+    serverType: 'matrix',
+    implemented: true,
+    hasOptions: true,
+    defaultOptions: ['非常满意', '满意', '一般', '不满意', '非常不满意'],
+    configPanel: 'matrix',
+    renderType: 'matrix_dropdown',
+    draft: { matrix: { rows: ['服务态度', '响应速度', '专业程度'], selectionType: 'single' } }
+  },
   {
     legacyType: 29,
-    label: '星亮题',
+    label: '星级题',
     serverType: 'rating',
     implemented: true,
     defaultLegacy: true,
@@ -96,7 +116,15 @@ const LEGACY_QUESTION_TYPE_DEFINITIONS = [
       }
     }
   },
-  { legacyType: 36, label: '比重题', implemented: false, hasOptions: true }
+  {
+    legacyType: 36,
+    label: '比重题',
+    serverType: 'ratio',
+    implemented: true,
+    defaultLegacy: true,
+    hasOptions: true,
+    defaultOptions: ['选项1', '选项2', '选项3']
+  }
 ]
 
 function freezeList(list) {
@@ -136,12 +164,14 @@ function buildDefaultLegacyMap(entries) {
 const SERVER_QUESTION_TYPE_SET = new Set()
 const serverQuestionTypeLabels = {}
 const serverQuestionTypeAnalyticsKinds = {}
+const serverQuestionTypeSubmissionKinds = {}
 const SERVER_OPTION_TYPES = []
 
 for (const definition of SERVER_QUESTION_TYPE_DEFINITIONS) {
   SERVER_QUESTION_TYPE_SET.add(definition.type)
   serverQuestionTypeLabels[definition.type] = definition.label
   serverQuestionTypeAnalyticsKinds[definition.type] = definition.analyticsKind || 'other'
+  serverQuestionTypeSubmissionKinds[definition.type] = definition.submissionKind || 'other'
   if (definition.hasOptions) SERVER_OPTION_TYPES.push(definition.type)
 }
 
@@ -169,6 +199,7 @@ export const LEGACY_TO_SERVER_TYPE_MAP = freezeRecord(LEGACY_TO_SERVER_TYPE)
 export const SERVER_TO_LEGACY_TYPE_MAP = freezeRecord(buildDefaultLegacyMap(LEGACY_QUESTION_TYPE_DEFINITIONS))
 export const SERVER_QUESTION_TYPE_LABELS = freezeRecord(serverQuestionTypeLabels)
 export const SERVER_QUESTION_TYPE_ANALYTICS_KINDS = freezeRecord(serverQuestionTypeAnalyticsKinds)
+export const SERVER_QUESTION_TYPE_SUBMISSION_KINDS = freezeRecord(serverQuestionTypeSubmissionKinds)
 export const LEGACY_QUESTION_TYPE_LABELS = freezeRecord(legacyQuestionTypeLabels)
 export const IMPLEMENTED_LEGACY_QUESTION_TYPES = Object.freeze(IMPLEMENTED_LEGACY_TYPES.slice())
 export const LEGACY_QUESTION_RENDER_TYPES = freezeRecord(buildRecord(
@@ -220,6 +251,10 @@ export function getServerQuestionTypeLabel(type) {
 
 export function getServerQuestionAnalyticsKind(type) {
   return SERVER_QUESTION_TYPE_ANALYTICS_KINDS[normalizeServerQuestionType(type)] || 'other'
+}
+
+export function getServerQuestionSubmissionKind(type) {
+  return SERVER_QUESTION_TYPE_SUBMISSION_KINDS[normalizeServerQuestionType(type)] || 'other'
 }
 
 export function legacyQuestionTypeHasOptions(type) {

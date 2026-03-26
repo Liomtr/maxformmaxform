@@ -305,8 +305,33 @@ async function init(){
   let syntaxModule: any = false
   if(props.enableSyntax){
     try {
-      const mod:any = await import('highlight.js')
-      const hljs = mod.default || mod
+      const [
+        { default: hljs },
+        { default: javascript },
+        { default: typescript },
+        { default: xml },
+        { default: css },
+        { default: json },
+        { default: bash }
+      ] = await Promise.all([
+        import('highlight.js/lib/core'),
+        import('highlight.js/lib/languages/javascript'),
+        import('highlight.js/lib/languages/typescript'),
+        import('highlight.js/lib/languages/xml'),
+        import('highlight.js/lib/languages/css'),
+        import('highlight.js/lib/languages/json'),
+        import('highlight.js/lib/languages/bash')
+      ])
+      hljs.registerLanguage('javascript', javascript)
+      hljs.registerLanguage('js', javascript)
+      hljs.registerLanguage('typescript', typescript)
+      hljs.registerLanguage('ts', typescript)
+      hljs.registerLanguage('html', xml)
+      hljs.registerLanguage('xml', xml)
+      hljs.registerLanguage('css', css)
+      hljs.registerLanguage('json', json)
+      hljs.registerLanguage('bash', bash)
+      hljs.registerLanguage('shell', bash)
       syntaxModule = { highlight: (text:string)=> hljs.highlightAuto(text).value }
     } catch (e){
       console.warn('[QuillRichTextDialog] highlight.js 加载失败, 已降级为无语法高亮', e)

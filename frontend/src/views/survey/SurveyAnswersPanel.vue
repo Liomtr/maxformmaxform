@@ -154,12 +154,22 @@
                   <span class="type">{{ question.questionTypeLabel }}</span>
                 </div>
               </div>
+              <div class="question-meta">
+                <span class="question-meta__pill">有效答卷 {{ formatNumber(question.totalAnswers) }}</span>
+                <span v-if="question.type === 'files'" class="question-meta__pill">文件总数 {{ formatNumber(question.totalFiles) }}</span>
+              </div>
             </header>
-            <div v-if="question.type === 'choice'" class="question-table">
+            <QuestionAnalyticsChart
+              v-if="question.type === 'choice' && isChartViewMode"
+              :question="question"
+              :mode="activeViewMode"
+            />
+            <div v-else-if="question.type === 'choice'" class="question-table">
               <div class="table-head">
                 <span class="col-option">选项</span>
                 <span class="col-count">小计</span>
                 <span class="col-ratio">比例</span>
+                <span v-if="isRankingQuestion(question)" class="col-rank">平均排序</span>
               </div>
               <div
                 v-for="(option, idx) in question.options || []"
@@ -177,13 +187,59 @@
                     ></span>
                   </span>
                 </span>
+                <span v-if="isRankingQuestion(question)" class="col-rank">{{ formatScore(option.avgRank) }}</span>
               </div>
             </div>
 
+            <QuestionAnalyticsChart
+              v-else-if="question.type === 'ratio' && isChartViewMode"
+              :question="question"
+              :mode="activeViewMode"
+            />
+            <div v-else-if="question.type === 'ratio'" class="question-table">
+              <div class="table-head">
+                <span class="col-option">选项</span>
+                <span class="col-ratio">平均占比</span>
+                <span class="col-count">非零答卷</span>
+                <span class="col-ratio">非零比例</span>
+              </div>
+              <div
+                v-for="(option, idx) in question.options || []"
+                :key="`ratio-${idx}`"
+                class="table-row"
+              >
+                <span class="col-option">{{ option.label }}</span>
+                <span class="col-ratio">
+                  <span class="ratio-value">{{ formatPercent(option.avgShare || 0) }}</span>
+                  <span class="ratio-bar">
+                    <span
+                      class="ratio-fill"
+                      :style="{ width: clampPercent(option.avgShare || 0), background: barPalette[idx % barPalette.length] }"
+                    ></span>
+                  </span>
+                </span>
+                <span class="col-count">{{ formatNumber(option.count) }}</span>
+                <span class="col-ratio">
+                  <span class="ratio-value">{{ formatPercent(option.percentage) }}</span>
+                  <span class="ratio-bar">
+                    <span
+                      class="ratio-fill"
+                      :style="{ width: clampPercent(option.percentage), background: barPalette[idx % barPalette.length] }"
+                    ></span>
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            <QuestionAnalyticsChart
+              v-else-if="question.type === 'rating' && isChartViewMode"
+              :question="question"
+              :mode="activeViewMode"
+            />
             <div v-else-if="question.type === 'rating'" class="question-rating">
               <div class="rating-score">
                 <span class="value">{{ formatScore(question.avgScore) }}</span>
-                <span class="label">{{ question.sourceType === 'scale' ? '平均值' : '平均分' }}</span>
+                <span class="label">{{ getQuestionStatAverageLabel(question) }}</span>
               </div>
               <ul class="rating-distribution">
                 <li v-for="entry in getDistributionEntries(question)" :key="entry.key">
@@ -213,25 +269,37 @@
               <p v-else>暂无有效样本。</p>
             </div>
 
-            <div v-else-if="question.type === 'metric'" class="question-metric">
-              <div class="metric-card">
-                <span class="metric-card-label">平均值</span>
-                <strong>{{ formatScore(question.avgValue) }}</strong>
+            <template v-else-if="question.type === 'metric'">
+              <QuestionAnalyticsChart
+                v-if="isChartViewMode"
+                :question="question"
+                :mode="activeViewMode"
+              />
+              <div class="question-metric">
+                <div class="metric-card">
+                  <span class="metric-card-label">平均值</span>
+                  <strong>{{ formatScore(question.avgValue) }}</strong>
+                </div>
+                <div class="metric-card">
+                  <span class="metric-card-label">最小值</span>
+                  <strong>{{ formatScore(question.minValue) }}</strong>
+                </div>
+                <div class="metric-card">
+                  <span class="metric-card-label">最大值</span>
+                  <strong>{{ formatScore(question.maxValue) }}</strong>
+                </div>
+                <div class="metric-card">
+                  <span class="metric-card-label">有效答卷</span>
+                  <strong>{{ formatNumber(question.totalAnswers) }}</strong>
+                </div>
               </div>
-              <div class="metric-card">
-                <span class="metric-card-label">最小值</span>
-                <strong>{{ formatScore(question.minValue) }}</strong>
-              </div>
-              <div class="metric-card">
-                <span class="metric-card-label">最大值</span>
-                <strong>{{ formatScore(question.maxValue) }}</strong>
-              </div>
-              <div class="metric-card">
-                <span class="metric-card-label">有效答卷</span>
-                <strong>{{ formatNumber(question.totalAnswers) }}</strong>
-              </div>
-            </div>
+            </template>
 
+            <QuestionAnalyticsChart
+              v-else-if="question.type === 'matrix' && isChartViewMode"
+              :question="question"
+              :mode="activeViewMode"
+            />
             <div v-else-if="question.type === 'matrix'" class="question-matrix">
               <div
                 v-for="row in question.rows || []"
@@ -270,9 +338,19 @@
             </div>
 
             <div v-else-if="question.type === 'files'" class="question-files">
-              <div class="file-summary">
-                <span class="text-pill">有效答卷 {{ formatNumber(question.totalAnswers) }}</span>
-                <span class="text-pill">文件总数 {{ formatNumber(question.totalFiles) }}</span>
+              <QuestionAnalyticsChart
+                v-if="isChartViewMode"
+                :question="question"
+                :mode="activeViewMode"
+              />
+              <div class="file-toolbar">
+                <div class="file-summary">
+                  <span class="text-pill">有效答卷 {{ formatNumber(question.totalAnswers) }}</span>
+                  <span class="text-pill">文件总数 {{ formatNumber(question.totalFiles) }}</span>
+                </div>
+                <button class="btn ghost btn-compact" :disabled="!hasAttachmentFiles || isDownloadingAttachments" @click="downloadAttachmentBundle">
+                  {{ isDownloadingAttachments ? '打包中...' : '下载全部附件' }}
+                </button>
               </div>
               <div v-if="question.sampleFiles?.length" class="file-list">
                 <a
@@ -291,7 +369,8 @@
             </div>
 
             <div v-else class="question-text">
-              <p>暂不支持该题型的图表分析，可查看原始答卷了解详情。</p>
+              <p>该题型暂不提供结构化统计图，可直接查看原始答卷明细。</p>
+              <button class="btn ghost btn-compact" :disabled="!surveyId" @click="openAnswerManagement">查看原始答卷</button>
             </div>
 
           </article>
@@ -322,7 +401,33 @@
             <div class="card-icon">📁</div>
             <h3>附件下载</h3>
             <p>批量打包问卷附件，快速完成归档与审核。</p>
-            <button class="btn ghost" :disabled="!surveyId || isDownloadingAttachments" @click="downloadAttachmentBundle">
+            <div class="download-summary">
+              <span class="download-pill">上传题 {{ formatNumber(attachmentQuestionSummaries.length) }}</span>
+              <span class="download-pill">文件总数 {{ formatNumber(attachmentTotalFiles) }}</span>
+              <span class="download-pill">涉及答卷 {{ formatNumber(attachmentAnsweredCount) }}</span>
+            </div>
+            <ul v-if="attachmentQuestionSummaries.length" class="download-list">
+              <li v-for="item in attachmentQuestionSummaries" :key="item.questionId">
+                <span>{{ item.questionTitle }}</span>
+                <strong>{{ formatNumber(item.totalFiles) }} 个文件</strong>
+              </li>
+            </ul>
+            <div v-else class="download-empty">当前问卷还没有文件上传题。</div>
+            <div v-if="attachmentSampleFiles.length" class="download-samples">
+              <a
+                v-for="file in attachmentSampleFiles"
+                :key="file.id"
+                class="download-sample"
+                :href="file.url"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span>{{ file.name }}</span>
+                <strong>{{ formatFileSize(file.size) }}</strong>
+              </a>
+            </div>
+            <div v-else class="download-empty">当前还没有可下载的附件样本。</div>
+            <button class="btn ghost" :disabled="!surveyId || !hasAttachmentFiles || isDownloadingAttachments" @click="downloadAttachmentBundle">
               {{ isDownloadingAttachments ? '打包中...' : '下载附件' }}
             </button>
           </div>
@@ -331,34 +436,43 @@
 
       <section v-else class="advanced-panel">
         <div class="advanced-card">
-          <h3>自定义查询</h3>
-          <p>设置筛选条件快速定位目标受访者。</p>
-          <div class="query-row">
-            <select class="input">
-              <option>题目</option>
-              <option>渠道</option>
-              <option>时间</option>
-            </select>
-            <select class="input">
-              <option>包含</option>
-              <option>等于</option>
-              <option>大于</option>
-            </select>
-            <input class="input" placeholder="输入值" />
-            <button class="btn ghost">添加条件</button>
+          <h3>时间筛选</h3>
+          <p>按提交时间筛选答卷，并直接跳转到答卷列表页查看结果。</p>
+          <div class="query-grid">
+            <label class="query-field">
+              <span>开始时间</span>
+              <input v-model="advancedStartTime" class="input" type="datetime-local" />
+            </label>
+            <label class="query-field">
+              <span>结束时间</span>
+              <input v-model="advancedEndTime" class="input" type="datetime-local" />
+            </label>
+          </div>
+          <div class="advanced-hint">
+            <span v-if="advancedStartTime">开始：{{ formatAdvancedDateTime(advancedStartTime) }}</span>
+            <span v-if="advancedEndTime">结束：{{ formatAdvancedDateTime(advancedEndTime) }}</span>
+            <span v-if="!advancedStartTime && !advancedEndTime">未设置时间筛选，将查看全部答卷。</span>
           </div>
           <div class="advanced-actions">
-            <button class="btn primary">执行查询</button>
-            <button class="btn ghost">保存模板</button>
+            <button class="btn primary" :disabled="!surveyId || !canApplyAdvancedFilter" @click="applyAdvancedFilter">查看筛选结果</button>
+            <button class="btn ghost" :disabled="!surveyId || !canApplyAdvancedFilter" @click="saveAdvancedFilter">保存筛选</button>
+            <button class="btn ghost" :disabled="!savedAdvancedFilter" @click="restoreAdvancedFilter">恢复已存</button>
+            <button class="btn ghost" :disabled="!advancedStartTime && !advancedEndTime" @click="clearAdvancedFilter">清空</button>
           </div>
         </div>
 
         <div class="advanced-card">
-          <h3>SPSS 高级分析</h3>
-          <p>导出数据至 SPSS 或下载语法文件，满足深度分析需求。</p>
+          <h3>SPSS 交换文件</h3>
+          <p>导出 Excel 原始数据，并下载可用于变量说明与标签映射的 SPSS 语法文件。</p>
+          <div class="advanced-hint">
+            <span>题目数 {{ formatNumber(props.questions.length) }}</span>
+            <span>建议先导出 Excel，再在 SPSS 中导入数据并执行语法。</span>
+          </div>
           <div class="advanced-actions">
-            <button class="btn primary">导出数据 (.sav)</button>
-            <button class="btn ghost">导出语法 (.sps)</button>
+            <button class="btn primary" :disabled="!surveyId || isExportingAnswers" @click="exportAnswersData">
+              {{ isExportingAnswers ? '导出中...' : '导出 Excel 数据' }}
+            </button>
+            <button class="btn ghost" :disabled="!props.questions.length" @click="downloadSpsSyntax">下载语法 (.sps)</button>
           </div>
         </div>
       </section>
@@ -367,15 +481,22 @@
 </template>
 
 <script setup lang="ts">
-import * as echarts from 'echarts'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { downloadSurveyAttachmentsZip, downloadSurveyExcel } from '@/api/surveyAnswers'
 import { getResults as getSurveyStatistics, type SurveyResults } from '@/api/surveys'
-import { getServerQuestionAnalyticsKind, getServerQuestionTypeLabel } from '@/utils/questionTypeRegistry'
+import { echarts } from '@/utils/echarts'
+import {
+  getQuestionStatAverageLabel as getSharedQuestionStatAverageLabel,
+  getQuestionStatDistributionLabel as getSharedQuestionStatDistributionLabel,
+  normalizeQuestionStat as normalizeSharedQuestionStat
+} from '../../../../shared/questionModel.js'
 
-type QuestionType = 'choice' | 'text' | 'rating' | 'metric' | 'files' | 'matrix' | 'other'
+type ChartInstance = ReturnType<typeof echarts.init>
+const QuestionAnalyticsChart = defineAsyncComponent(() => import('./QuestionAnalyticsChart.vue'))
+
+type QuestionType = 'choice' | 'text' | 'rating' | 'metric' | 'files' | 'matrix' | 'ratio' | 'other'
 type SectionKey = 'summary' | 'analysis' | 'download' | 'advanced'
 type SystemTab = '设备' | '浏览器' | '操作系统'
 type AnalysisViewMode = '表格' | '明细' | '饼状' | '条形' | '折线'
@@ -397,6 +518,8 @@ interface QuestionOption {
   count: number
   percentage: number
   avgRank?: number | null
+  avgShare?: number | null
+  totalShare?: number | null
 }
 
 interface SampleFile {
@@ -405,6 +528,18 @@ interface SampleFile {
   url: string
   type?: string
   size: number
+}
+
+interface AttachmentQuestionSummary {
+  questionId: string | number
+  questionTitle: string
+  totalAnswers: number
+  totalFiles: number
+}
+
+interface SavedAdvancedFilter {
+  startTime: string
+  endTime: string
 }
 
 interface MatrixRowStat {
@@ -492,11 +627,14 @@ const isExportingAnswers = ref(false)
 const isDownloadingAttachments = ref(false)
 const activeSystemTab = ref<SystemTab>('设备')
 const activeViewMode = ref<AnalysisViewMode>('表格')
+const advancedStartTime = ref('')
+const advancedEndTime = ref('')
+const savedAdvancedFilter = ref<SavedAdvancedFilter | null>(null)
 const trendChartRef = ref<HTMLDivElement | null>(null)
 const systemChartRef = ref<HTMLDivElement | null>(null)
 
-let trendChart: echarts.ECharts | null = null
-let systemChart: echarts.ECharts | null = null
+let trendChart: ChartInstance | null = null
+let systemChart: ChartInstance | null = null
 
 const sidebarItems: Array<{ key: SectionKey; label: string; icon: string }> = [
   { key: 'summary', label: '答卷概览', icon: '📋' },
@@ -626,6 +764,55 @@ const categoryStats = computed<CategoryStatItem[]>(() => {
 })
 
 const analysisQuestions = computed<CategoryStatItem[]>(() => categoryStats.value)
+const isChartViewMode = computed(() => ['饼状', '条形', '折线'].includes(activeViewMode.value))
+const advancedFilterStorageKey = computed(() => `survey-results-advanced-filter:${props.surveyId || 'default'}`)
+const canApplyAdvancedFilter = computed(() => {
+  if (!props.surveyId) return false
+  if (advancedStartTime.value && advancedEndTime.value) {
+    return new Date(advancedStartTime.value).getTime() <= new Date(advancedEndTime.value).getTime()
+  }
+  return true
+})
+const attachmentQuestions = computed(() => {
+  return analysisQuestions.value.filter(question => question.type === 'files')
+})
+const attachmentQuestionSummaries = computed<AttachmentQuestionSummary[]>(() => {
+  return attachmentQuestions.value.map(question => ({
+    questionId: question.questionId,
+    questionTitle: question.questionTitle,
+    totalAnswers: Number(question.totalAnswers || 0),
+    totalFiles: Number(question.totalFiles || 0)
+  }))
+})
+const attachmentTotalFiles = computed(() => {
+  return attachmentQuestions.value.reduce((sum, question) => sum + Number(question.totalFiles || 0), 0)
+})
+const attachmentAnsweredCount = computed(() => {
+  return attachmentQuestions.value.reduce((sum, question) => sum + Number(question.totalAnswers || 0), 0)
+})
+const attachmentSampleFiles = computed<SampleFile[]>(() => {
+  const seen = new Set<number>()
+  const files: SampleFile[] = []
+
+  for (const question of attachmentQuestions.value) {
+    for (const file of question.sampleFiles || []) {
+      const fileId = Number(file?.id || 0)
+      if (fileId > 0 && seen.has(fileId)) continue
+      if (fileId > 0) seen.add(fileId)
+      files.push({
+        id: fileId,
+        name: String(file?.name || ''),
+        url: String(file?.url || ''),
+        type: String(file?.type || ''),
+        size: Number(file?.size || 0)
+      })
+      if (files.length >= 6) return files
+    }
+  }
+
+  return files
+})
+const hasAttachmentFiles = computed(() => attachmentTotalFiles.value > 0)
 
 function formatNumber(value?: number | null): string {
   if (value === undefined || value === null || Number.isNaN(Number(value))) return '-'
@@ -659,91 +846,11 @@ function formatFileSize(size?: number | null): string {
 }
 
 function normalizeQuestionStat(stat: any): CategoryStatItem | null {
-  const typeLabel = getServerQuestionTypeLabel(stat.type)
-  const analyticsKind = getServerQuestionAnalyticsKind(stat.type)
+  return normalizeSharedQuestionStat(stat) as CategoryStatItem | null
+}
 
-  if (analyticsKind === 'choice') {
-    return {
-      questionId: stat.questionId,
-      questionTitle: stat.questionTitle,
-      questionTypeLabel: typeLabel,
-      sourceType: stat.type,
-      type: 'choice',
-      isRadio: stat.type === 'radio',
-      options: stat.options || []
-    }
-  }
-
-  if (analyticsKind === 'text') {
-    return {
-      questionId: stat.questionId,
-      questionTitle: stat.questionTitle,
-      questionTypeLabel: typeLabel,
-      sourceType: stat.type,
-      type: 'text',
-      sampleAnswers: stat.sampleAnswers || [],
-      totalAnswers: stat.totalAnswers || 0,
-      earliestDate: stat.earliestDate || null,
-      latestDate: stat.latestDate || null
-    }
-  }
-
-  if (analyticsKind === 'metric') {
-    return {
-      questionId: stat.questionId,
-      questionTitle: stat.questionTitle,
-      questionTypeLabel: typeLabel,
-      sourceType: stat.type,
-      type: 'metric',
-      totalAnswers: stat.totalAnswers || 0,
-      avgValue: stat.avgValue ?? null,
-      minValue: stat.minValue ?? null,
-      maxValue: stat.maxValue ?? null
-    }
-  }
-
-  if (analyticsKind === 'matrix') {
-    return {
-      questionId: stat.questionId,
-      questionTitle: stat.questionTitle,
-      questionTypeLabel: typeLabel,
-      sourceType: stat.type,
-      type: 'matrix',
-      rows: (stat.rows || []).map((row: any) => ({
-        label: row.label,
-        value: row.value,
-        totalAnswers: row.totalAnswers || 0,
-        options: row.options || []
-      }))
-    }
-  }
-
-  if (analyticsKind === 'files') {
-    return {
-      questionId: stat.questionId,
-      questionTitle: stat.questionTitle,
-      questionTypeLabel: typeLabel,
-      sourceType: stat.type,
-      type: 'files',
-      totalAnswers: stat.totalAnswers || 0,
-      totalFiles: stat.totalFiles || 0,
-      sampleFiles: stat.sampleFiles || []
-    }
-  }
-
-  if (analyticsKind === 'rating') {
-    return {
-      questionId: stat.questionId,
-      questionTitle: stat.questionTitle,
-      questionTypeLabel: typeLabel,
-      sourceType: stat.type,
-      type: 'rating',
-      avgScore: stat.avgScore ?? 0,
-      distribution: stat.distribution || {}
-    }
-  }
-
-  return null
+function getQuestionStatAverageLabel(question: CategoryStatItem) {
+  return getSharedQuestionStatAverageLabel(question)
 }
 
 function getDistributionEntries(question: CategoryStatItem) {
@@ -755,9 +862,39 @@ function getDistributionEntries(question: CategoryStatItem) {
 }
 
 function getDistributionLabel(question: CategoryStatItem, key: string) {
-  if (question.sourceType === 'rating') return `${key} 星`
-  if (question.sourceType === 'scale') return `${key} 分`
-  return key
+  return getSharedQuestionStatDistributionLabel(question, key)
+}
+
+function isRankingQuestion(question: CategoryStatItem) {
+  return question.sourceType === 'ranking'
+}
+
+function formatAdvancedDateTime(value: string) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function refreshSavedAdvancedFilter() {
+  if (!props.surveyId || typeof window === 'undefined') {
+    savedAdvancedFilter.value = null
+    return
+  }
+  try {
+    const raw = window.localStorage.getItem(advancedFilterStorageKey.value)
+    if (!raw) {
+      savedAdvancedFilter.value = null
+      return
+    }
+    const parsed = JSON.parse(raw)
+    savedAdvancedFilter.value = {
+      startTime: String(parsed?.startTime || ''),
+      endTime: String(parsed?.endTime || '')
+    }
+  } catch {
+    savedAdvancedFilter.value = null
+  }
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string) {
@@ -769,7 +906,7 @@ function triggerBrowserDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-function ensureChartInstance(element: HTMLDivElement | null, instance: echarts.ECharts | null) {
+function ensureChartInstance(element: HTMLDivElement | null, instance: ChartInstance | null) {
   if (!element) return null
   if (instance) return instance
   return echarts.init(element)
@@ -831,6 +968,191 @@ function renderTrendChart() {
       }
     }]
   })
+}
+
+function toRouteDateTime(value: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toISOString()
+}
+
+function applyAdvancedFilter() {
+  if (!props.surveyId) {
+    ElMessage.warning('缺少问卷 ID，无法筛选答卷。')
+    return
+  }
+  if (!canApplyAdvancedFilter.value) {
+    ElMessage.warning('结束时间不能早于开始时间。')
+    return
+  }
+
+  const query: Record<string, string> = {
+    surveyId: props.surveyId,
+    title: props.surveyTitle || ''
+  }
+  const startTime = toRouteDateTime(advancedStartTime.value)
+  const endTime = toRouteDateTime(advancedEndTime.value)
+  if (startTime) query.startTime = startTime
+  if (endTime) query.endTime = endTime
+
+  router.push({
+    name: 'AnswerManagement',
+    query
+  })
+}
+
+function saveAdvancedFilter() {
+  if (!props.surveyId) {
+    ElMessage.warning('缺少问卷 ID，无法保存筛选条件。')
+    return
+  }
+  if (!canApplyAdvancedFilter.value) {
+    ElMessage.warning('结束时间不能早于开始时间。')
+    return
+  }
+
+  window.localStorage.setItem(advancedFilterStorageKey.value, JSON.stringify({
+    startTime: advancedStartTime.value,
+    endTime: advancedEndTime.value
+  }))
+  refreshSavedAdvancedFilter()
+  ElMessage.success('筛选条件已保存到当前浏览器。')
+}
+
+function restoreAdvancedFilter() {
+  const saved = savedAdvancedFilter.value
+  if (!saved) {
+    ElMessage.warning('当前没有已保存的筛选条件。')
+    return
+  }
+
+  advancedStartTime.value = saved.startTime
+  advancedEndTime.value = saved.endTime
+  ElMessage.success('已恢复已保存的筛选条件。')
+}
+
+function clearAdvancedFilter() {
+  advancedStartTime.value = ''
+  advancedEndTime.value = ''
+}
+
+function buildSpsSyntax() {
+  const questions = Array.isArray(props.questions) ? props.questions : []
+  const lines: string[] = [
+    '* Survey result variable dictionary.',
+    'SET UNICODE=ON.',
+    `* Survey title: ${escapeSpsText(props.surveyTitle || 'survey')}.`,
+    '* Import the exported Excel data into SPSS first, then run labels below.',
+    ''
+  ]
+
+  const variableLines: string[] = []
+  const valueLabelBlocks: string[] = []
+  const formatLines: string[] = []
+
+  questions.forEach((question, index) => {
+    const questionIndex = index + 1
+    const rawTitle = String(question?.title || `Question ${questionIndex}`)
+    const normalizedTitle = escapeSpsText(rawTitle)
+    const sourceType = String(question?.type || '')
+
+    if (sourceType === 'matrix' && Array.isArray(question?.matrix?.rows)) {
+      const rows = question.matrix.rows
+      rows.forEach((row: any, rowIndex: number) => {
+        const variableName = `Q${questionIndex}_${rowIndex + 1}`
+        const rowLabel = escapeSpsText(String(row?.label || row?.value || `Row ${rowIndex + 1}`))
+        variableLines.push(`${variableName} '${normalizedTitle} - ${rowLabel}'`)
+        pushValueLabels(valueLabelBlocks, variableName, question?.options)
+      })
+      return
+    }
+
+    const variableName = `Q${questionIndex}`
+    variableLines.push(`${variableName} '${normalizedTitle}'`)
+
+    if (sourceType === 'radio' || sourceType === 'dropdown' || sourceType === 'checkbox' || sourceType === 'ranking') {
+      pushValueLabels(valueLabelBlocks, variableName, question?.options)
+      return
+    }
+
+    if (sourceType === 'slider' || sourceType === 'scale' || sourceType === 'rating') {
+      formatLines.push(`FORMATS ${variableName} (F8.2).`)
+      return
+    }
+
+    if (sourceType === 'date') {
+      formatLines.push(`* ${variableName} is expected to be imported as a date or ISO string.`)
+      return
+    }
+
+    if (sourceType === 'upload') {
+      formatLines.push(`* ${variableName} contains uploaded file metadata or URLs.`)
+    }
+  })
+
+  if (variableLines.length) {
+    lines.push('VARIABLE LABELS')
+    variableLines.forEach((line, index) => {
+      lines.push(`  ${line}${index === variableLines.length - 1 ? '.' : ''}`)
+    })
+    lines.push('')
+  }
+
+  if (valueLabelBlocks.length) {
+    lines.push(...valueLabelBlocks)
+    lines.push('')
+  }
+
+  if (formatLines.length) {
+    lines.push(...formatLines)
+    lines.push('')
+  }
+
+  lines.push('EXECUTE.')
+  return `${lines.join('\r\n')}\r\n`
+}
+
+function pushValueLabels(blocks: string[], variableName: string, options: any) {
+  if (!Array.isArray(options) || options.length === 0) return
+
+  const pairs = options
+    .map((option: any) => {
+      const rawValue = option?.value ?? option?.label
+      const rawLabel = option?.label ?? option?.value
+      if (rawValue == null || rawLabel == null) return null
+      return `  ${formatSpsValue(rawValue)} '${escapeSpsText(String(rawLabel))}'`
+    })
+    .filter(Boolean)
+
+  if (pairs.length === 0) return
+
+  blocks.push(`VALUE LABELS ${variableName}`)
+  pairs.forEach((pair, index) => {
+    blocks.push(`${pair}${index === pairs.length - 1 ? '.' : ''}`)
+  })
+}
+
+function formatSpsValue(value: unknown) {
+  const num = Number(value)
+  if (Number.isFinite(num) && String(value).trim() !== '') {
+    return String(num)
+  }
+  return `'${escapeSpsText(String(value ?? ''))}'`
+}
+
+function escapeSpsText(value: string) {
+  return value.replace(/'/g, "''").replace(/\r?\n/g, ' ')
+}
+
+function downloadSpsSyntax() {
+  const content = buildSpsSyntax()
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const safeTitle = (props.surveyTitle || `survey-${props.surveyId || 'results'}`)
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .trim() || 'survey-results'
+  triggerBrowserDownload(blob, `${safeTitle}.sps`)
+  ElMessage.success('SPSS 语法文件已开始下载。')
 }
 
 function renderSystemChart() {
@@ -925,6 +1247,7 @@ const exportAnswersData = async () => {
   try {
     const blob = await downloadSurveyExcel(props.surveyId)
     triggerBrowserDownload(blob, `survey-${props.surveyId}.xlsx`)
+    ElMessage.success('答卷数据已开始下载。')
   } finally {
     isExportingAnswers.value = false
   }
@@ -935,11 +1258,16 @@ const downloadAttachmentBundle = async () => {
     if (!props.surveyId) ElMessage.warning('缺少问卷 ID，无法下载附件。')
     return
   }
+  if (!hasAttachmentFiles.value) {
+    ElMessage.warning('当前问卷还没有可打包下载的附件。')
+    return
+  }
 
   isDownloadingAttachments.value = true
   try {
     const blob = await downloadSurveyAttachmentsZip(props.surveyId)
     triggerBrowserDownload(blob, `survey-${props.surveyId}-attachments.zip`)
+    ElMessage.success('附件压缩包已开始下载。')
   } finally {
     isDownloadingAttachments.value = false
   }
@@ -975,6 +1303,9 @@ async function fetchRealStatistics() {
 }
 
 onMounted(() => {
+  refreshSavedAdvancedFilter()
+  advancedStartTime.value = savedAdvancedFilter.value?.startTime || ''
+  advancedEndTime.value = savedAdvancedFilter.value?.endTime || ''
   void fetchRealStatistics()
   window.addEventListener('resize', resizeCharts)
 })
@@ -1004,6 +1335,9 @@ watch(() => props.initialResults, value => {
 })
 
 watch(() => props.surveyId, () => {
+  refreshSavedAdvancedFilter()
+  advancedStartTime.value = savedAdvancedFilter.value?.startTime || ''
+  advancedEndTime.value = savedAdvancedFilter.value?.endTime || ''
   void fetchRealStatistics()
 })
 </script>
@@ -1630,6 +1964,7 @@ watch(() => props.surveyId, () => {
 
 .question-analytics__header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
@@ -1640,6 +1975,23 @@ watch(() => props.surveyId, () => {
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.question-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.question-meta__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .badge {
@@ -1674,7 +2026,7 @@ watch(() => props.surveyId, () => {
 .table-head,
 .table-row {
   display: grid;
-  grid-template-columns: 350px 70px 350px;
+  grid-template-columns: minmax(0, 1.2fr) 88px minmax(220px, 1fr) 88px;
   gap: 16px;
   font-size: 13px;
   color: #475569;
@@ -1712,6 +2064,12 @@ watch(() => props.surveyId, () => {
   align-items: center;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.col-rank {
+  text-align: right;
+  font-weight: 600;
+  color: #1f2937;
 }
 
 .ratio-bar {
@@ -1798,6 +2156,9 @@ watch(() => props.surveyId, () => {
 }
 
 .question-text {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   font-size: 13px;
   color: #6b7280;
   background: rgba(226, 232, 240, 0.6);
@@ -1893,6 +2254,14 @@ watch(() => props.surveyId, () => {
   gap: 12px;
 }
 
+.file-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .file-list {
   display: flex;
   flex-direction: column;
@@ -1984,6 +2353,11 @@ watch(() => props.surveyId, () => {
   align-self: flex-start;
 }
 
+.btn-compact {
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
 .btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -1997,6 +2371,72 @@ watch(() => props.surveyId, () => {
 
 .card-icon {
   font-size: 32px;
+}
+
+.download-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.download-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.download-list,
+.download-samples {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.download-list li,
+.download-sample {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  text-decoration: none;
+}
+
+.download-list li span,
+.download-sample span {
+  min-width: 0;
+  word-break: break-all;
+}
+
+.download-list li strong,
+.download-sample strong {
+  flex-shrink: 0;
+  color: #475569;
+  font-size: 12px;
+}
+
+.download-sample:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+}
+
+.download-empty {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.08);
+  color: #64748b;
+  font-size: 13px;
 }
 
 .advanced-panel {
@@ -2015,18 +2455,35 @@ watch(() => props.surveyId, () => {
   gap: 16px;
 }
 
-.query-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
 .input {
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.6);
   min-width: 120px;
   font-size: 13px;
+}
+
+.query-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.query-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.advanced-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .advanced-actions {
@@ -2100,8 +2557,9 @@ watch(() => props.surveyId, () => {
     grid-template-columns: 1fr;
   }
 
-  .choice-table li {
-    grid-template-columns: 1fr;
+  .table-head,
+  .table-row {
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
