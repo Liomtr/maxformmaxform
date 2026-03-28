@@ -1,3 +1,5 @@
+import type { PaginatedResultDTO } from '../../../shared/pagination.contract.js'
+
 export interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
@@ -8,7 +10,4 @@ export interface ApiResponse<T = unknown> {
   }
 }
 
-export interface PaginatedData<T> {
-  total: number
-  list: T[]
-}
+export type PaginatedData<T> = PaginatedResultDTO<T>

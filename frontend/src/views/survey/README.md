@@ -1,166 +1,136 @@
-# Survey 问卷模块
+# Survey 问卷模块说明
 
-## 📋 模块概述
+## 模块定位
 
-Survey 文件夹是 TrustForm信任表单 的**核心功能模块**，包含了问卷系统完整生命周期的所有页面组件。该模块负责问卷的创建、编辑、预览、填写、结果展示和管理等功能。
+`frontend/src/views/survey/` 是当前问卷业务前端主模块，覆盖：
 
-## 📁 文件结构
+- 创建入口
+- 编辑器
+- 预览
+- 填写
+- 结果分析
+- 答卷管理
+- 分享与发布
 
-```
+当前模块的组织方式已经不是早期的“单页面堆功能”，而是：
+
+- 入口页
+- 页面壳
+- 子面板
+- 领域 composable
+- 填写页 hook
+
+## 当前文件结构
+
+```text
 survey/
-├── CreateSurveyPage.vue     # 创建问卷页面
-├── EditSurveyPage.vue       # 编辑问卷页面
-├── FillSurveyPage.vue       # 填写问卷页面
-├── PreviewSurveyPage.vue    # 预览问卷页面
-├── ResultsPage.vue          # 结果分析页面
-├── （问卷列表已并入工作台 UserDashboard.vue 展示）
-└── README.md               # 本说明文档
+├─ CreateSurveyLanding.vue             创建引导页
+├─ CreateSurveyPage.vue                编辑页入口
+├─ CreateSurveyPageShell.vue           编辑器页面壳与 tab 布局
+├─ CreateSurveyQuestionConfigPanel.vue 左侧题型/题库/大纲面板
+├─ CreateSurveyQuestionListPanel.vue   中部题目编辑区
+├─ CreateSurveyLogicSettings.vue       逻辑、批量编辑、分组、配额弹层
+├─ CreateSurveyPublishPanel.vue        设置/分享面板
+├─ FillSurveyPage.vue                  PC 填写页
+├─ FillSurveyMobilePage.vue            移动端填写页
+├─ SurveyPreviewEmbed.vue              编辑器内嵌预览
+├─ SurveyTopToolbar.vue                顶部工具栏
+├─ SurveySharePanel.vue                分享面板
+├─ SurveyAnswersPanel.vue              结果分析主面板
+├─ QuestionAnalyticsChart.vue          题目统计图表
+├─ ResultsPage.vue                     独立结果页
+├─ AnswerManagementPage.vue            答卷管理页
+├─ AnswerDetailsPanel.vue              答卷详情
+├─ SuccessPage.vue                     提交成功页
+├─ useFillSurveyVisibility.ts          填写页可见性逻辑
+├─ useFillSurveyJumpLogic.ts           填写页跳题逻辑
+├─ useFillSurveyQuota.ts               填写页配额逻辑
+├─ useFillSurveyUpload.ts              填写页上传逻辑
+├─ usePreviewSurveyMapping.ts          预览映射
+└─ createSurveyPage.css                编辑器共享样式
 ```
 
-## 🔄 问卷生命周期
+## 关键依赖关系
 
-### 1. 创建阶段 - CreateSurveyPage.vue
-- **功能**：新建问卷
-- **特性**：
-  - 设置问卷基本信息（标题、描述、时间等）
-  - 添加不同类型的题目（单选、多选、填空等）
-  - 配置问卷设置和权限
-- **用户**：问卷创建者、管理员
+### 编辑器
 
-### 2. 编辑阶段 - EditSurveyPage.vue
-- **功能**：修改已有问卷
-- **特性**：
-  - 编辑问卷内容和题目
-  - 调整问卷配置
-  - 版本控制和变更记录
-- **用户**：问卷创建者、管理员
+当前编辑器的主链路是：
 
-### 3. 预览阶段 - PreviewSurveyPage.vue
-- **功能**：发布前预览
-- **特性**：
-  - 模拟用户填写体验
-  - 检查问卷逻辑和样式
-  - 发布前最终确认
-- **用户**：问卷创建者、管理员
+```text
+CreateSurveyPage
+  -> useSurveyEditor
+    -> editor-core
+    -> editor-logic
+    -> editor-batch
+    -> editor-quota
+    -> editor-richtext
+  -> CreateSurveyPageShell
+    -> CreateSurveyQuestionConfigPanel
+    -> CreateSurveyQuestionListPanel
+    -> CreateSurveyLogicSettings
+    -> CreateSurveyPublishPanel
+    -> SurveyPreviewEmbed / SurveyAnswersPanel
+```
 
-### 4. 收集阶段 - FillSurveyPage.vue
-- **功能**：用户填写问卷
-- **特性**：
-  - 响应式问卷界面
-  - 实时验证和保存
-  - 匿名或实名填写
-- **用户**：所有受邀用户
+说明：
 
-### 5. 分析阶段 - ResultsPage.vue
-- **功能**：数据展示和分析
-- **特性**：
-  - 统计图表展示
-  - 数据导出功能
-  - 深度分析报告
-- **用户**：问卷创建者、管理员、数据分析师
+- `CreateSurveyPage.vue` 现在只是薄入口。
+- `useSurveyEditor.ts` 已收缩为装配层，负责聚合子 composable 并暴露稳定的 `editorContext`。
+- 编辑器的核心职责已拆到 `frontend/src/composables/editor/` 下。
 
-### 6. 管理阶段 - 工作台（UserDashboard.vue）
-- 问卷集中管理、发布/停止、复制、删除、设计/发送/分析等操作统一在工作台完成。
+### 填写页
 
-## 🎯 核心功能特性
+填写页当前核心关系是：
 
-### 📝 问卷创建与编辑
-- 支持多种题型（单选、多选、填空、评分等）
-- 拖拽式题目排序
-- 条件逻辑设置
-- 自定义样式主题
+```text
+FillSurveyPage
+  -> useFillSurveyVisibility
+  -> useFillSurveyJumpLogic
+  -> useFillSurveyQuota
+  -> useFillSurveyUpload
+```
 
-### 📊 数据收集与分析
-- 实时数据统计
-- 多维度数据分析
-- 可视化图表展示
-- 数据导出（Excel、CSV、PDF）
+这意味着填写页已完成第一轮按能力拆分。
 
-### 🔐 权限与安全
-- 访问权限控制
-- 匿名填写支持
-- 数据加密存储
-- 防重复提交
+## 当前模块事实
 
-### 📱 响应式设计
-- 移动端适配
-- 跨平台兼容
-- 离线填写支持
-- PWA 应用支持
+### 已完成的结构化改进
 
-## 🛠️ 技术实现
+- 编辑器不再由单个页面文件承担全部 UI。
+- 页面壳、题型面板、题目列表、逻辑弹层、发布面板已经拆开。
+- `useSurveyEditor.ts` 已从巨型实现收缩为装配层。
+- 编辑器核心状态、逻辑、批量操作、配额、富文本已拆到独立 `editor-*` composable。
+- 填写页的可见性、跳题、配额、上传已拆成独立 hook。
+- 预览与结果分析都能在编辑器上下文中复用问卷结构。
 
-### 前端技术栈
-- **框架**：Vue 3 + TypeScript
-- **构建工具**：Vite
-- **UI库**：待定（Element Plus / Ant Design Vue）
-- **状态管理**：Pinia
-- **路由**：Vue Router
+### 当前仍然存在的主要问题
 
-### 组件设计原则
-- **单一职责**：每个页面专注特定功能
-- **可复用性**：公共组件抽取
-- **可维护性**：清晰的代码结构
-- **可扩展性**：预留扩展接口
+- `editorContext` 暴露字段仍然很多，页面壳与子面板对上下文的依赖面偏大。
+- 左侧题型面板仍展示少量未完全落地的 legacy 入口。
+- 发布面板、预览、结果分析与编辑态之间仍存在进一步收敛边界的空间。
+- 模块文档必须持续跟随真实文件结构，不能再沿用早期 `EditSurveyPage.vue / PreviewSurveyPage.vue` 的旧口径。
 
-## 🚀 开发计划
+## 维护原则
 
-### Phase 1 - 基础功能（当前阶段）
-- [ ] 完成基础页面框架
-- [ ] 实现问卷创建功能
-- [ ] 开发题型组件库
+更新问卷模块时，优先遵循：
 
-### Phase 2 - 核心功能
-- [ ] 问卷编辑器实现
-- [ ] 填写页面交互
-- [ ] 数据收集接口
+1. 新题型先补共享注册表和共享统计模型，再补 UI。
+2. 新编辑能力优先拆进 `composables/editor/` 或子面板，不回流到单个巨型页面。
+3. 填写页新能力优先独立成 hook，不直接堆进 `FillSurveyPage.vue`。
+4. 页面壳与面板之间尽量通过最小上下文字段通信，避免无限扩张 `editorContext`。
+5. README 必须同步真实文件结构，避免文档继续滞后于代码。
 
-### Phase 3 - 高级功能
-- [ ] 数据可视化
-- [ ] 高级分析功能
-- [ ] 导出功能完善
+## 当前边界判断
 
-### Phase 4 - 优化增强
-- [ ] 性能优化
-- [ ] 用户体验提升
-- [ ] 移动端优化
+当前编辑器能力边界可按下面理解：
 
-## 📋 开发规范
+```text
+useSurveyEditor
+  -> editor-core
+  -> editor-logic
+  -> editor-batch
+  -> editor-quota
+  -> editor-richtext
+```
 
-### 文件命名
-- 页面文件：`PascalCase.vue`
-- 组件文件：`PascalCase.vue`
-- 工具文件：`camelCase.ts`
-
-### 代码规范
-- 使用 TypeScript 进行类型约束
-- 遵循 Vue 3 Composition API 规范
-- 统一的错误处理机制
-- 完善的单元测试覆盖
-
-### 提交规范
-- `feat:` 新功能
-- `fix:` 修复问题
-- `docs:` 文档更新
-- `style:` 样式调整
-- `refactor:` 代码重构
-
-## 🤝 贡献指南
-
-1. Fork 项目
-2. 创建功能分支
-3. 提交代码变更
-4. 推送到分支
-5. 创建 Pull Request
-
-## 📞 联系方式
-
-如有问题或建议，请联系开发团队：
-- 项目负责人：[待填写]
-- 技术支持：[待填写]
-- 文档维护：[待填写]
-
----
-
-*最后更新：2024年9月26日*
-*版本：v1.0.0*
+后续继续拆分时，应优先在 `frontend/src/composables/editor/` 内按能力扩展，而不是把逻辑重新回流到 `useSurveyEditor.ts` 或页面组件。

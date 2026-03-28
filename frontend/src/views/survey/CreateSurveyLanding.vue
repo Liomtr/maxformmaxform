@@ -12,7 +12,7 @@
           <a href="#" :class="{on: topNav==='workspace'}" @click.prevent="goTopNav('workspace')">工作台</a>
           <a href="#" :class="{on: topNav==='contacts'}" @click.prevent="goTopNav('contacts')">联系人</a>
           <a href="#" :class="{on: topNav==='templates'}" @click.prevent="goTopNav('templates')">模板中心</a>
-          <a href="#" :class="{on: topNav==='admin'}" @click.prevent="goTopNav('admin')">管理后台</a>
+          <a v-if="isAdminUser" href="#" :class="{on: topNav==='admin'}" @click.prevent="goTopNav('admin')">管理后台</a>
         </nav>
       </div>
       <div class="tb-right">
@@ -102,16 +102,21 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useAuthStore } from '@/stores/auth'
 import { createSurvey } from '@/api/surveys'
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
+const { username, isAdmin } = storeToRefs(authStore)
 
 // 顶部导航激活与用户信息（保持与工作台一致）
 const topNav = ref<'workspace'|'contacts'|'templates'|'admin'>('workspace')
-const displayUser = computed(()=> localStorage.getItem('rememberUser') || '用户')
+const displayUser = computed(() => username.value || localStorage.getItem('rememberUser') || '用户')
+const isAdminUser = computed(() => isAdmin.value)
 const goTopNav = (k: 'workspace'|'contacts'|'templates'|'admin') => {
   topNav.value = k
   if (k === 'workspace') router.push('/user-dashboard')
@@ -122,7 +127,7 @@ const goTopNav = (k: 'workspace'|'contacts'|'templates'|'admin') => {
 }
 const handleUserCommand = (cmd: 'account'|'password'|'logout') => {
   if (cmd === 'logout') {
-    localStorage.removeItem('token')
+    authStore.logout()
     router.push('/login')
   } else if (cmd === 'account') {
     // 可跳转到用户中心页；此处暂保持在当前页

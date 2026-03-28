@@ -2,6 +2,10 @@ import knex from '../db/knex.js'
 
 const TABLE = 'answers'
 
+function getDb(options = {}) {
+  return options.db || knex
+}
+
 function parseJson(row) {
   if (!row) return null
   if (typeof row.answers_data === 'string') row.answers_data = JSON.parse(row.answers_data)
@@ -9,18 +13,20 @@ function parseJson(row) {
 }
 
 const Answer = {
-  async findById(id) {
-    const row = await knex(TABLE).where('id', id).first()
+  async findById(id, options = {}) {
+    const db = getDb(options)
+    const row = await db(TABLE).where('id', id).first()
     return parseJson(row)
   },
 
-  async create({ survey_id, answers_data, ip_address, user_agent, duration, status = 'completed' }) {
-    const [id] = await knex(TABLE).insert({
+  async create({ survey_id, answers_data, ip_address, user_agent, duration, status = 'completed' }, options = {}) {
+    const db = getDb(options)
+    const [id] = await db(TABLE).insert({
       survey_id,
       answers_data: JSON.stringify(answers_data),
       ip_address, user_agent, duration, status
     })
-    return Answer.findById(id)
+    return Answer.findById(id, options)
   },
 
   async list({ survey_id, page = 1, pageSize = 20, startTime, endTime } = {}) {
@@ -33,9 +39,26 @@ const Answer = {
     return { total, list: list.map(parseJson) }
   },
 
-  async count(survey_id) {
-    const row = await knex(TABLE).where('survey_id', survey_id).count('* as cnt').first()
+  async count(survey_id, options = {}) {
+    const db = getDb(options)
+    const row = await db(TABLE).where('survey_id', survey_id).count('* as cnt').first()
     return row.cnt
+  },
+
+  async getAggregateState(survey_id, options = {}) {
+    const db = getDb(options)
+    const row = await db(TABLE)
+      .where('survey_id', survey_id)
+      .count({ answer_count: '*' })
+      .max({ latest_answer_id: 'id' })
+      .max({ latest_submitted_at: 'submitted_at' })
+      .first()
+
+    return {
+      answerCount: Number(row?.answer_count || 0),
+      latestAnswerId: row?.latest_answer_id == null ? null : Number(row.latest_answer_id),
+      latestSubmittedAt: row?.latest_submitted_at || null
+    }
   },
 
   async countByIp(survey_id, ip_address) {
@@ -53,8 +76,10 @@ const Answer = {
     return parseJson(row)
   },
 
-  async deleteBatch(ids) {
-    return knex(TABLE).whereIn('id', ids).del()
+  async deleteBatch(ids, options = {}) {
+    const db = getDb(options)
+    if (!Array.isArray(ids) || ids.length === 0) return 0
+    return db(TABLE).whereIn('id', ids).del()
   },
 
   async findBySurveyId(survey_id) {
@@ -62,9 +87,10 @@ const Answer = {
     return rows.map(parseJson)
   },
 
-  async deleteBySurveyIds(surveyIds) {
+  async deleteBySurveyIds(surveyIds, options = {}) {
+    const db = getDb(options)
     if (!Array.isArray(surveyIds) || surveyIds.length === 0) return 0
-    return knex(TABLE).whereIn('survey_id', surveyIds).del()
+    return db(TABLE).whereIn('survey_id', surveyIds).del()
   }
 }
 

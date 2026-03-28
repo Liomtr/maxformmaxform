@@ -1,19 +1,11 @@
 import http from './http'
 import type { ApiResponse } from '../types/api'
+import type { MessageDTO, MessageListQueryDTO } from '../../../shared/management.contract.js'
 
-export interface MessageDTO {
-  id?: number
-  title: string
-  content?: string
-  read?: boolean
-  createdAt?: string
-  type?: string
-  level?: string
-  entityId?: number | null
-}
+export type { MessageDTO, MessageListQueryDTO }
 
-export async function listMessages(): Promise<MessageDTO[]> {
-  const { data } = await http.get<ApiResponse<MessageDTO[]>>('/messages')
+export async function listMessages(params?: MessageListQueryDTO): Promise<MessageDTO[]> {
+  const { data } = await http.get<ApiResponse<MessageDTO[]>>('/messages', { params })
   return data.data || []
 }
 

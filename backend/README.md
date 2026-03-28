@@ -1,52 +1,218 @@
-# TrustForm信任表单 后端
+# 后端说明
 
-两种运行模式：
+本文档只对应当前 `backend/` 目录源码。
 
-- 简化内存版（联调演示快）：
-  - `npm run dev:63004`（示例端口 63004；默认推荐 63002）
-- 持久化完整版（Mongo + JWT）：
-  1. 复制 `.env.example` 为 `.env` 并修改 `MONGODB_URI`、`JWT_SECRET` 等
-  2. 安装依赖：`npm i express cors helmet express-rate-limit dotenv mongoose jsonwebtoken bcryptjs`（项目已部分安装）
-  3. 启动：`npm run dev`（入口为 `app.cjs`）
+当前后端不是旧版的 MongoDB / ClickHouse / 适配器架构，而是：
 
-## 双数据库架构（MongoDB + ClickHouse）
+- `Node.js + Express`
+- `Knex + MySQL`
+- `JWT + bcryptjs`
+- `multer + ExcelJS`
 
-- 业务数据使用 MongoDB（Mongoose）存储（问卷、题目、答卷主记录）
-- 行为与统计数据写入 ClickHouse（行级明细），用于高性能聚合查询
+## 启动方式
 
-当前实现：在提交答卷接口 POST /api/surveys/:id/responses 中，Mongo 写入成功后将答卷明细“尽力而为”地双写到 ClickHouse 表 `survey_answers`。
+### 1. 安装依赖
 
-## 数据库适配器模式
-
-- 所有模型/仓储均通过 `src/database` 暴露的适配器访问：`database.getModel('User')`、`database.getOrm()` 等。
-- 默认适配器为 MongoDB（基于 Mongoose 实现），可通过 `DB_CLIENT=mongodb` 控制；新增适配器时在 `src/database/adapters/` 编写实现并注册到 `registry`。
-- 适配器负责数据库连接、断开与健康状态回报；业务层无需关心底层驱动，即可在未来切换到 MySQL、PostgreSQL、SQL Server、SQLite、人大金仓、达梦、OceanBase 等数据库。
-- `models/index.js` 汇总所有领域模型，供 MongoDB 适配器注册；其他数据库可提供各自的仓储实现或 ORM 映射。
-
-### 环境变量
-
-参考 `.env.example` 配置以下变量：
-
-- DB_CLIENT（默认 mongodb，可扩展为其他适配器）
-- MONGODB_URI
-- JWT_SECRET
-- CLICKHOUSE_URL（默认 http://127.0.0.1:8123）
-- CLICKHOUSE_USER/CICKHOUSE_PASSWORD（如启用鉴权）
-- CLICKHOUSE_DB（默认 default，建议使用 trustform）
-
-### 启动与验证
-
-1) 安装依赖（后端目录）
-2) 启动 MongoDB 与 ClickHouse
-3) 运行 `node app.cjs` 或使用工作区已有任务
-4) 打开 `/health`，可见 `dbClient`、`dbOk`、`mongoOk` 和 `clickhouseOk`
-
-答卷写入后，可在 ClickHouse 中查询：
-
-```
-SELECT projectId, questionId, count() FROM trustform.survey_answers GROUP BY projectId, questionId ORDER BY count() DESC;
+```bash
+cd backend
+npm install
 ```
 
-前端代理默认指向 `http://127.0.0.1:63002`。
+### 2. 配置环境变量
 
-> 遇到 PowerShell curl 引号问题，可使用 `node ./scripts/smoke-login.js` 做冒烟测试。
+参考根目录 `.env.example`，至少确认：
+
+```env
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=survey_system
+
+JWT_SECRET=please-change-me
+JWT_EXPIRES_IN=7d
+
+FRONTEND_URL=http://127.0.0.1:63000
+PORT=63002
+```
+
+生产环境必须显式设置 `JWT_SECRET`。
+
+### 3. 初始化数据库
+
+当前启动流程不会自动执行迁移和种子。
+
+首次启动前请手动执行：
+
+```bash
+cd backend
+npm run db:migrate
+npm run db:seed:dev
+```
+
+说明：
+
+- `db:migrate`：确保表结构存在并补齐新增字段。
+- `db:seed:dev`：补建开发账号和基础字典，不会重置已有账号密码。
+- `db:seed:init-admin`：单独补建管理员账号。
+
+### 4. 启动服务
+
+开发模式：
+
+```bash
+cd backend
+npm run dev
+```
+
+单次运行开发配置：
+
+```bash
+cd backend
+npm run dev:once
+```
+
+生产模式：
+
+```bash
+cd backend
+npm start
+```
+
+## 运行行为
+
+- 实际启动入口：`server.js`
+- Express 装配层：`app.js`
+- 默认端口：`63002`
+- 健康检查：`GET /health`
+
+`server.js` 当前只做两件事：
+
+1. 执行一次 MySQL 连通性检查。
+2. 启动 HTTP 服务并注册优雅退出。
+
+它不会自动执行 `migrate()`、`seed()` 或任何历史双库同步逻辑。
+
+## 目录结构
+
+```text
+backend/
+├─ server.js
+├─ app.js
+├─ initAdmin.js
+├─ scripts/
+│  ├─ start-dev.js
+│  ├─ start-prod.js
+│  ├─ db-migrate.js
+│  └─ db-seed.js
+├─ src/
+│  ├─ config/
+│  ├─ constants/
+│  ├─ db/
+│  ├─ middlewares/
+│  ├─ models/
+│  ├─ policies/
+│  ├─ repositories/
+│  ├─ routes/
+│  ├─ services/
+│  └─ utils/
+└─ test/
+```
+
+## 当前分层
+
+### 问卷域
+
+问卷域是目前分层最完整的模块：
+
+- 路由：`src/routes/surveys.js`
+- 查询服务：`src/services/surveyQueryService.js`
+- 命令服务：`src/services/surveyCommandService.js`
+- 上传服务：`src/services/surveyUploadService.js`
+- 结果服务：`src/services/surveyResultsService.js`
+- 聚合仓储：`src/repositories/surveyAggregateRepository.js`
+- 事务封装：`src/db/transaction.js`
+- 访问策略：`src/policies/surveyPolicy.js`
+- 题型校验：`src/utils/questionSchema.js`
+
+当前调用链可理解为：
+
+```text
+route
+  -> policy / access check
+    -> service
+      -> repository + transaction
+        -> model
+```
+
+### 其他后台模块
+
+用户、部门、角色、职位、消息、审计等模块当前仍更接近：
+
+```text
+route
+  -> model
+    -> JSON response
+```
+
+这不是错误，但意味着当前分层深度在模块间还不完全一致。
+
+## 数据模型
+
+当前数据库主线为 `MySQL + JSON 写模型`：
+
+- `surveys.questions`：题目定义
+- `surveys.settings`：问卷设置
+- `surveys.style`：样式配置
+- `answers.answers_data`：答卷内容
+- `files`：上传文件、附件、答卷文件绑定
+- `messages`：系统/审计消息
+- `audit_logs`：操作审计
+
+上传文件存放在 `backend/uploads/`，通过 `/uploads/*` 静态暴露。
+
+## 共享层协作
+
+问卷题型不是后端单独维护的：
+
+- `../shared/questionTypeRegistry.js`：题型定义与提交语义
+- `../shared/questionModel.js`：题目统计逻辑
+
+后端会复用这层做：
+
+- 题型结构校验
+- 上传题约束校验
+- 结果统计口径统一
+
+## 测试
+
+后端单测：
+
+```bash
+cd backend
+npm test
+```
+
+系统冒烟：
+
+```bash
+cd ..
+node scripts/system-smoke.mjs
+
+cd frontend
+npm run smoke:system
+```
+
+说明：
+
+- 仓库级入口与前端 npm 入口最终都调用根目录 `scripts/system-smoke.mjs`
+- 当前系统冒烟口径已更新到 `64 / 64`
+- 覆盖登录、问卷创建、上传、提交、结果、导出、答卷删除、关闭问卷与回收清理等主链路
+- `runId` 已改为毫秒时间戳 + pid + 随机后缀，可并发执行
+
+## 当前结论
+
+- 后端已经不是“所有逻辑都堆在路由里”的早期状态。
+- 问卷域已形成 `route + policy + service + repository + transaction` 基本分层。
+- 结果统计当前来自 MySQL 中的答卷数据实时聚合，而不是 ClickHouse。
+- 继续演进时，应优先把 `answers.js` 和其他后台模块按问卷域模式进一步收敛。

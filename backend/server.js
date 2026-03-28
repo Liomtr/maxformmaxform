@@ -1,7 +1,6 @@
 import app from './app.js'
 import config from './src/config/index.js'
 import knex from './src/db/knex.js'
-import { migrate, seed } from './src/db/migrate.js'
 
 async function start() {
   try {
@@ -11,9 +10,6 @@ async function start() {
     console.error('MySQL connection failed:', e.message)
     process.exit(1)
   }
-
-  await migrate()
-  await seed()
 
   const server = app.listen(config.port, () => {
     console.log(`Server running: http://127.0.0.1:${config.port}`)

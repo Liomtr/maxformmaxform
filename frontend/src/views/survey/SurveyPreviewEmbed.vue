@@ -66,29 +66,9 @@ import { ref, watchEffect } from 'vue'
 import FillSurveyPage from './FillSurveyPage.vue'
 import FillSurveyMobilePage from './FillSurveyMobilePage.vue'
 import { usePreviewSurveyMapping } from './usePreviewSurveyMapping'
+import type { SurveyPreviewPanelContract } from './surveyPreviewPanelContract'
 
-interface LegacyQuestionDraft {
-  id: string | number
-  type: number
-  title: string
-  description?: string
-  required?: boolean
-  options?: any[]
-  logic?: any
-  jumpLogic?: any
-  optionGroups?: any[]
-  quotasEnabled?: boolean
-  quotaMode?: string
-  quotaShowRemaining?: boolean
-}
-
-interface SurveyFormLike {
-  title: string
-  description: string
-  questions: LegacyQuestionDraft[]
-}
-
-const props = defineProps<{ surveyForm: SurveyFormLike }>()
+const props = defineProps<SurveyPreviewPanelContract>()
 
 // 题目映射（数字 -> 后端字符串类型）
 const { mappedSurveyForPreview } = usePreviewSurveyMapping(props.surveyForm)

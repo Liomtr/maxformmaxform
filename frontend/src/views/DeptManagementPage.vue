@@ -44,7 +44,7 @@ import type { Dept } from '@/types/user'
 const depts = ref<Dept[]>([])
 const showDialog = ref(false)
 const editing = ref(false)
-const form = ref<{ name: string; parent_id?: number }>({ name: '' })
+const form = ref<{ name: string; parent_id?: number | null }>({ name: '' })
 const editId = ref<number | null>(null)
 
 async function load() {
@@ -72,6 +72,7 @@ async function save() {
   await load()
 }
 async function remove(id: number) {
+  if (!window.confirm(`确认删除部门 #${id} 吗？`)) return
   await deleteDept(id)
   await load()
 }

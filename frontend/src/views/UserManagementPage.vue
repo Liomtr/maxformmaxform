@@ -84,6 +84,7 @@ async function resetPwd(id: number) {
 }
 
 async function remove(id: number) {
+  if (!window.confirm(`确认删除用户 #${id} 吗？该操作不可恢复。`)) return
   await deleteUser(id)
   await load()
 }

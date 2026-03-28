@@ -591,6 +591,7 @@
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell } from '@element-plus/icons-vue'
@@ -599,17 +600,20 @@ import { listFolders, listAllFolders, createFolder, renameFolder, deleteFolder, 
 import { listDepts, createDept, updateDept, deleteDept } from '@/api/depts'
 import { fetchUsers, createUser, updateUser, updatePassword, enableUser, disableUser, deleteUser, importUsers } from '@/api/userAdmin'
 import http from '@/api/http'
+import { useAuthStore } from '@/stores/auth'
 import type { Dept, User } from '@/types/user'
 // 已移除编码逻辑，直接使用数字ID
 const router = useRouter()
+const authStore = useAuthStore()
+const { user: currentUser, username, isAdmin, roleLabel: authRoleLabel, identityCode: authIdentityCode } = storeToRefs(authStore)
 // 顶栏品牌图片：若存在 public/brand-logo.png 则优先显示；否则回退内联图标
 const brandImgSrc = '/brand-logo.png'
 const brandImgError = ref(false)
 // 顶部导航激活状态
 const topNav = ref<'workspace'|'contacts'|'templates'|'admin'>('workspace')
-const displayUser = computed(()=> localStorage.getItem('rememberUser') || '用户')
+const displayUser = computed(() => username.value || localStorage.getItem('rememberUser') || '用户')
 // 避免在模板中直接访问 localStorage，改为受控的计算属性
-const isAdminUser = computed(() => (localStorage.getItem('role') || 'user') === 'admin')
+const isAdminUser = computed(() => isAdmin.value)
 const goTopNav = (k: 'workspace'|'contacts'|'templates'|'admin') => {
   topNav.value = k
   if (k === 'workspace') router.push('/user-dashboard')
@@ -621,7 +625,7 @@ const goTopNav = (k: 'workspace'|'contacts'|'templates'|'admin') => {
 // 右上角用户菜单
 const handleUserCommand = (cmd: 'account'|'password'|'logout') => {
   if (cmd === 'logout') {
-    localStorage.removeItem('token')
+    authStore.logout()
     router.push('/login')
   } else if (cmd === 'account') {
     setMenu('profile')
@@ -1483,14 +1487,11 @@ const changePwd = () => {
 // 账号信息展示字段（示例：可从 /api/auth/me 替换为真实数据）
 const enterpriseName = computed(() => localStorage.getItem('enterpriseName') || '——')
 const departmentName = computed(() => localStorage.getItem('departmentName') || '——')
-// 登录时后端若返回 role，可在 Login.vue 存储 localStorage.role
-const roleLabel = computed(() => {
-  const r = localStorage.getItem('role') || 'user'
-  return r === 'admin' ? '管理员' : '普通用户'
-})
-const identityCode = computed(() => localStorage.getItem('identityCode') || (roleLabel.value === '管理员' ? 'PROJECT_ADMIN' : 'USER'))
-const createdAtDisp = computed(() => localStorage.getItem('createdAt') || '--')
-const lastLoginAtDisp = computed(() => localStorage.getItem('lastLoginAt') || '--')
+// 权限展示统一从 auth store 输出
+const roleLabel = computed(() => authRoleLabel.value)
+const identityCode = computed(() => authIdentityCode.value)
+const createdAtDisp = computed(() => currentUser.value?.created_at || currentUser.value?.createdAt || localStorage.getItem('createdAt') || '--')
+const lastLoginAtDisp = computed(() => currentUser.value?.last_login_at || currentUser.value?.lastLoginAt || localStorage.getItem('lastLoginAt') || '--')
 </script>
 <style scoped>
 .user-dashboard-shell { display:flex; flex-direction:column; min-height:100vh; }

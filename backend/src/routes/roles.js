@@ -1,46 +1,35 @@
 import { Router } from 'express'
-import Role from '../models/Role.js'
+import { asyncRoute } from '../http/asyncRoute.js'
 import { authRequired, requireRole } from '../middlewares/auth.js'
+import {
+  createManagedRole,
+  deleteManagedRole,
+  listManagedRoles,
+  updateManagedRole
+} from '../services/roleService.js'
 
 const router = Router()
 
 router.use(authRequired, requireRole('admin'))
 
-router.get('/', async (req, res, next) => {
-  try {
-    const list = await Role.list()
-    res.json({ success: true, data: list })
-  } catch (e) { next(e) }
-})
+router.get('/', asyncRoute(async (_req, res) => {
+  const list = await listManagedRoles()
+  res.json({ success: true, data: list })
+}))
 
-router.post('/', async (req, res, next) => {
-  try {
-    const { name, code, permissions, remark } = req.body || {}
-    if (!name || !code) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION', message: '角色名称和编码为必填项' } })
-    }
-    const existing = await Role.findByCode(code)
-    if (existing) return res.status(409).json({ success: false, error: { code: 'ROLE_EXISTS', message: '角色编码已存在' } })
+router.post('/', asyncRoute(async (req, res) => {
+  const role = await createManagedRole({ actor: req.user, body: req.body })
+  res.json({ success: true, data: role })
+}))
 
-    const role = await Role.create({ name, code, permissions, remark })
-    res.json({ success: true, data: role })
-  } catch (e) { next(e) }
-})
+router.put('/:id', asyncRoute(async (req, res) => {
+  const role = await updateManagedRole({ actor: req.user, roleId: req.params.id, body: req.body })
+  res.json({ success: true, data: role })
+}))
 
-router.put('/:id', async (req, res, next) => {
-  try {
-    const { name, permissions, remark } = req.body || {}
-    const role = await Role.update(req.params.id, { name, permissions, remark })
-    if (!role) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '角色不存在' } })
-    res.json({ success: true, data: role })
-  } catch (e) { next(e) }
-})
-
-router.delete('/:id', async (req, res, next) => {
-  try {
-    await Role.delete(req.params.id)
-    res.json({ success: true })
-  } catch (e) { next(e) }
-})
+router.delete('/:id', asyncRoute(async (req, res) => {
+  await deleteManagedRole({ actor: req.user, roleId: req.params.id })
+  res.json({ success: true })
+}))
 
 export default router

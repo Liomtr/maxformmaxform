@@ -1,6 +1,8 @@
 # API 接口说明（对齐当前实现）
 
-本文档列出后端可用接口的用途、请求/响应示例与常见错误码，基于 `backend/app.cjs` 当前实现。
+> 2026-03-28 注：本文档仍保留部分旧版双库架构描述，尚未完全迁移到当前 `backend/app.js + backend/server.js + Express + Knex + MySQL` 实现。阅读时请优先以 `backend/src/routes/*`、`README0326.md`、`backend/README.md` 与 `docs/系统结构评估与优化建议-2026-03-27.md` 为准。
+
+本文档列出后端可用接口的用途、请求/响应示例与常见错误码，但个别“健康检查 / analytics / 数据库适配器”相关段落仍在校准中。
 
 - 基础地址（开发默认）：http://127.0.0.1:63002
 - 所有业务接口前缀：/api

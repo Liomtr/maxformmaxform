@@ -87,6 +87,7 @@ const resetPwd = async (id: number) => {
 }
 
 const remove = async (id: number) => {
+  if (!window.confirm(`确认删除成员 #${id} 吗？该操作不可恢复。`)) return
   await deleteUser(id)
   await load()
 }

@@ -8,6 +8,7 @@ set "FRONTEND_PORT=63000"
 set "BACKEND_PORT=63002"
 
 echo [INFO] Project root: %ROOT%
+echo [INFO] Mode: development ^(Vite dev server with HMR^)
 
 where node >nul 2>nul || (
   echo [ERROR] Node.js was not found. Please install Node 18+ first.

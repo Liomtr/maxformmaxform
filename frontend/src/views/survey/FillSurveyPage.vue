@@ -1,6 +1,6 @@
 <!-- 填写问卷（美化版） -->
 <template>
-  <div class="page" :class="{ embed: preview }">
+  <div class="page" :class="{ embed: preview }" data-testid="fill-survey-page">
     <!-- 加载中 -->
     <el-skeleton v-if="loading" :rows="6" animated class="skeleton" />
 
@@ -42,9 +42,9 @@
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="q-form">
         <template v-for="(q, idx) in survey.questions" :key="'q-'+idx">
           <template v-if="visibleMap[String(idx+1)] !== false">
-          <el-form-item :prop="String(q.id ?? (idx+1))" :required="!!q.required" class="q-item">
+          <el-form-item :prop="String(q.id ?? (idx+1))" :required="!!q.required" class="q-item" :data-testid="`fill-question-${idx}`">
             <template #label>
-              <div class="q-label">
+              <div class="q-label" :data-testid="`fill-question-title-${idx}`">
                 <span v-if="!q.hideSystemNumber" class="q-number">{{ idx + 1 }}</span>
                 <span class="q-title">
                   <template v-if="(q as any).titleHtml">
@@ -364,13 +364,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getSurvey, getSurveyByShareCode, submitResponses, uploadSurveyFile, type UploadedSurveyFile } from '@/api/surveys'
+import { getSurvey, submitResponses, uploadSurveyFile, type UploadedSurveyFile } from '@/api/surveys'
 import type { Survey } from '@/types/survey'
 import { getQuestionRenderType } from '@/utils/questionTypeRegistry'
 import { buildUploadQuestionHelpText, clearUploadSubmissionToken, getUploadSubmissionToken, normalizeUploadQuestionConfig, validateSelectedUploadFiles } from '@/utils/uploadQuestion'
 type SurveyDTO = Survey
 import type { FormInstance, FormRules } from 'element-plus'
-import { applyVisibility } from '@/utils/visibility'
+import { useFillSurveyQuota } from './useFillSurveyQuota'
+import { useFillSurveyVisibility } from './useFillSurveyVisibility'
+import { useFillSurveyJumpLogic } from './useFillSurveyJumpLogic'
 // 已移除复杂编码逻辑，直接使用9位数字ID
 
 const props = defineProps<{ injectedSurvey?: SurveyDTO | null; preview?: boolean }>()
@@ -382,10 +384,7 @@ const survey = ref<SurveyDTO | null>(null)
 const form = ref<Record<string, any>>({})
 const formRef = ref<FormInstance>()
 const rules = ref<FormRules>({})
-const visibleMap = ref<Record<string, boolean>>({})
 // 跳题链：仅隐藏“当前题之后到目标题之前”的范围
-const jumpStartAfter = ref<number | null>(null)
-const jumpHideUntil = ref<number | null>(null)
 const submitting = ref(false)
 const successMsg = ref('')
 const errorMsg = ref('')
@@ -396,43 +395,38 @@ const currentUrl = ref('')
 const qrCanvasRef = ref<HTMLCanvasElement>()
 // 标记哪些题已经应用过“默认选中”（defaultSelected），避免用户取消后再次自动选中
 const defaultApplied = ref<Record<string, boolean>>({})
+const storageKey = computed(() => String(route.params.id || survey.value?.shareId || survey.value?.id || 'preview'))
+const routeShareId = computed(() => String(route.params.id || ''))
 const uploadState = ref<Record<string, boolean>>({})
 const uploadErrors = ref<Record<string, string>>({})
-const submissionToken = computed(() => {
-  const key = String(route.params.id || survey.value?.shareId || survey.value?.id || 'preview')
-  return getUploadSubmissionToken(key)
-})
+const submissionToken = computed(() => getUploadSubmissionToken(storageKey.value))
 
 // 已取消填写页题型图标展示（按需求隐藏）
 
 // 为分组随机生成稳定的展示计划（仅对本次会话稳定）
 const groupPlanCache = ref<Record<string, any[]>>({})
-const totalVisibleQuestions = computed(() => {
-  const questions = survey.value?.questions || []
-  if (!questions.length) return 0
-
-  const visibleCount = questions.filter((_, index) => visibleMap.value[String(index + 1)] !== false).length
-  return visibleCount || questions.length
+const { normalizeQuestionOptions, applyQuotaState } = useFillSurveyQuota()
+const {
+  visibleMap,
+  totalVisibleQuestions,
+  answeredVisibleQuestions,
+  progressPercent,
+  computeQuestionVisibility,
+  areConditionGroupsVisible,
+  syncAnswersWithVisibility
+} = useFillSurveyVisibility({
+  survey,
+  form
 })
-const answeredVisibleQuestions = computed(() => {
-  const questions = survey.value?.questions || []
-  return questions.reduce((count, q: any, index: number) => {
-    if (visibleMap.value[String(index + 1)] === false) return count
-
-    const key = String(q.id ?? (index + 1))
-    const value = form.value[key]
-    const answered = Array.isArray(value)
-      ? value.length > 0
-      : (value && typeof value === 'object'
-        ? Object.keys(value).length > 0
-        : value !== undefined && value !== null && String(value).trim() !== '')
-
-    return count + (answered ? 1 : 0)
-  }, 0)
-})
-const progressPercent = computed(() => {
-  if (!totalVisibleQuestions.value) return 0
-  return Math.min(100, Math.round((answeredVisibleQuestions.value / totalVisibleQuestions.value) * 100))
+const {
+  applyJumpLogic
+} = useFillSurveyJumpLogic({
+  survey,
+  form,
+  router,
+  shareId: routeShareId,
+  storageKey,
+  submissionToken
 })
 
 function getRenderType(q: any): string {
@@ -1002,6 +996,25 @@ function applyDefaultIfNeeded(q:any, idx:number){
   }
 }
 
+async function refreshVisibilityState() {
+  if (!survey.value) return false
+
+  const baseVisibility = computeQuestionVisibility()
+  const { visibility, invalidSubmitted } = await applyJumpLogic(baseVisibility)
+  if (invalidSubmitted) return true
+
+  syncAnswersWithVisibility({
+    vis: visibility,
+    filteredOptions,
+    getEmptyAnswerValue,
+    applyDefaultIfNeeded,
+    syncRankingAnswer,
+    isMatrixMultipleQuestion
+  })
+
+  return false
+}
+
 onMounted(async () => {
   try {
     if (props.injectedSurvey) {
@@ -1073,12 +1086,7 @@ onMounted(async () => {
       }
     })
     rules.value = nextRules
-    const answers: Record<number, any> = {}
-    survey.value.questions.forEach((q:any, i:number) => { const key = String(q.id ?? (i+1)); answers[i+1] = form.value[key] })
-    const vis = applyVisibility((survey.value.questions||[]).map((q:any, i:number)=>({ id: i+1, required: q.required, title: q.title, logic: q.logic })), answers)
-    visibleMap.value = Object.fromEntries(Object.entries(vis).map(([k,v])=>[String(k), v as boolean]))
-    survey.value.questions.forEach((q:any, i:number)=>{ if (q.type === 'ranking') syncRankingAnswer(q, i) })
-    survey.value.questions.forEach((q:any, i:number)=>{ const order=i+1; if (visibleMap.value[String(order)] !== false) applyDefaultIfNeeded(q,i) })
+    await refreshVisibilityState()
   } catch (e:any) {
     if (!props.injectedSurvey){
       const status = e?.response?.status; const msg = e?.response?.data?.error?.message || e?.response?.data?.message; const meta = e?.response?.data?.data
@@ -1094,162 +1102,10 @@ onMounted(async () => {
 let _visRAF = 0
 watch(form, () => {
   if (_visRAF) cancelAnimationFrame(_visRAF)
-  // 需要在回调内使用 await（无效问卷直接提交），因此将 RAF 回调标记为 async
+  // Keep the async boundary so invalid-survey auto-submit can still await navigation.
   _visRAF = requestAnimationFrame(async () => {
     if (!survey.value) return
-    const answers: Record<number, any> = {}
-    ;(survey.value.questions||[]).forEach((q:any, i:number) => {
-      const key = String(q.id ?? (i+1))
-      answers[i+1] = form.value[key]
-    })
-    const vis = applyVisibility((survey.value.questions||[]).map((q:any, i:number)=>({ id: i+1, required: q.required, title: q.title, logic: q.logic })), answers)
-    // 跳题逻辑：基于当前题答案计算“从哪一题之后开始隐藏、隐藏到哪一题（前一题）”
-    jumpStartAfter.value = null
-    jumpHideUntil.value = null
-    let hitInvalid = false
-    for (let i=0;i<(survey.value.questions||[]).length;i++){
-      const q:any = survey.value.questions[i]
-      const order = i + 1
-      const key = String(q.id ?? order)
-      // 只在题目可见且为选择题时处理
-  // 若题目本身因题目关联被隐藏，则不参与跳题判定，避免冲突
-  if (vis[order] === false) continue
-      const j:any = q.jumpLogic
-      if (!j) continue
-      // 无条件跳题（优先级低于按选项跳题）
-      let target:string|undefined
-      if (j.byOption && (q.type==='radio' || q.type==='checkbox')){
-        const val = form.value[key]
-        if (q.type==='radio') {
-          target = j.byOption[String(val)]
-        } else if (Array.isArray(val)) {
-          // 多选：若多选命中多个目标，取最远的（更大的题号或 end）
-          const candidates = val.map((v:any)=> j.byOption[String(v)]).filter(Boolean)
-          if (candidates.length) {
-            // end 视为最大
-            target = candidates.includes('end') ? 'end' : String(Math.max(...candidates.map((s:string)=> Number(s))))
-          }
-        }
-      }
-      if (!target && j.unconditional) target = String(j.unconditional)
-      if (target) {
-        if (target === 'end') {
-          // 从当前题之后到末尾全部隐藏
-          jumpStartAfter.value = Math.max(jumpStartAfter.value || 0, order)
-          jumpHideUntil.value = (survey.value.questions||[]).length + 1
-          break
-        } else if (target === 'invalid') {
-          hitInvalid = true
-          break
-        } else if (/^\d+$/.test(target)) {
-          const to = Number(target)
-          // 仅当确实跳过中间题时，才设置隐藏范围： (order, to)
-          if (to > order + 1) {
-            jumpStartAfter.value = Math.max(jumpStartAfter.value || 0, order)
-            jumpHideUntil.value = Math.max(jumpHideUntil.value || 0, to)
-          }
-        }
-      }
-    }
-    // 命中“直接提交为无效问卷”，立即尝试提交无效答卷
-    if (hitInvalid) {
-      // 构造最小 payload（无需答案内容）
-      const shareId = String(route.params.id || '')
-      try {
-        const res = await submitResponses(shareId, [], { invalid: true, clientSubmissionToken: submissionToken.value })
-        clearUploadSubmissionToken(String(route.params.id || survey.value?.shareId || survey.value?.id || 'preview'))
-        // 无论后端是否严格校验，前端直接显示“提交成功（无效）”并跳转
-        router.push({ name: 'SurveySuccess', params: { id: shareId }, query: { message: '感谢作答，本问卷不符合条件，已标记为无效提交。', title: survey.value?.title } })
-      } catch (e) {
-        clearUploadSubmissionToken(String(route.params.id || survey.value?.shareId || survey.value?.id || 'preview'))
-        // 出错时也跳转但提示不同
-        router.push({ name: 'SurveySuccess', params: { id: shareId }, query: { message: '您不符合本次问卷条件，已结束作答。', title: survey.value?.title } })
-      }
-      return
-    }
-    // 应用跳题：仅隐藏“当前题之后到目标题之前”的题目
-    if (jumpStartAfter.value && jumpHideUntil.value){
-      for (let i=0;i<(survey.value.questions||[]).length;i++){
-        const ord = i+1
-        if (ord > jumpStartAfter.value && ord < jumpHideUntil.value) {
-          vis[ord] = false
-        }
-      }
-    }
-    // 清空隐藏题答案并同步 visibleMap（按题目顺序判断）
-    ;(survey.value.questions||[]).forEach((q:any, i:number) => {
-      const order = i + 1
-      const key = String(q.id ?? order)
-      if (vis[order] === false) {
-        form.value[key] = getEmptyAnswerValue(q)
-      } else {
-        // 题目可见时，若选项级可见性变化导致当前值无效，需同步清理
-        if (q.type === 'radio' || q.type === 'checkbox') {
-          const allowed = new Set((filteredOptions(q, i) || []).map((opt:any)=> String(opt.value)))
-          if (q.type === 'radio') {
-            if (!allowed.has(String(form.value[key] ?? ''))) form.value[key] = ''
-          } else {
-            const arr = Array.isArray(form.value[key]) ? form.value[key] : []
-            form.value[key] = arr.filter((v:any)=> allowed.has(String(v)))
-          }
-          // 先尝试应用“默认选中”（仅一次，且仅在答案为空时）
-          applyDefaultIfNeeded(q, i)
-          // 默认选中（可选开关）：当“设置了选项关联”的选项出现时，若当前未选择，默认选中
-          if (q.autoSelectOnAppear) {
-            const visibleOpts:any[] = filteredOptions(q, i) || []
-            const autoOpts = visibleOpts.filter(o => Array.isArray(o.visibleWhen) && o.visibleWhen.length>0)
-            if (autoOpts.length>0) {
-            if (q.type === 'radio') {
-              if (!form.value[key]) {
-                form.value[key] = String(autoOpts[0].value)
-              }
-            } else if (q.type === 'checkbox') {
-              const arrNow = Array.isArray(form.value[key]) ? form.value[key] : []
-              if (arrNow.length === 0) {
-                form.value[key] = autoOpts.map(o => String(o.value))
-              }
-            }
-            }
-          }
-        } else if (q.type === 'ranking') {
-          syncRankingAnswer(q, i)
-        } else if (q.type === 'matrix') {
-          const allowed = new Set((filteredOptions(q, i) || []).map((opt: any) => String(opt.value)))
-          const current = form.value[key]
-          if (current && typeof current === 'object' && !Array.isArray(current)) {
-            const next = Object.fromEntries(
-              Object.entries(current)
-                .map(([rowKey, value]) => {
-                  if (isMatrixMultipleQuestion(q)) {
-                    const normalized = Array.isArray(value)
-                      ? Array.from(new Set(value.map((item: any) => String(item)).filter(item => allowed.has(item))))
-                      : []
-                    return [String(rowKey), normalized]
-                  }
-                  return [String(rowKey), String(value ?? '')]
-                })
-                .filter(([, value]) => {
-                  if (Array.isArray(value)) return value.length > 0
-                  return value === '' || allowed.has(value)
-                })
-            )
-            form.value[key] = next
-          }
-        } else if (q.type === 'ratio') {
-          const allowed = new Set((filteredOptions(q, i) || []).map((opt: any) => String(opt.value)))
-          const current = form.value[key]
-          if (current && typeof current === 'object' && !Array.isArray(current)) {
-            const next = Object.fromEntries(
-              Object.entries(current)
-                .map(([optionKey, rawValue]) => [String(optionKey), Number(rawValue)])
-                .filter(([optionKey, numeric]) => allowed.has(optionKey) && Number.isFinite(numeric))
-            )
-            form.value[key] = next
-          }
-        }
-      }
-    })
-  visibleMap.value = Object.fromEntries(Object.entries(vis).map(([k,v])=>[String(k), v as boolean]))
+    await refreshVisibilityState()
     _visRAF = 0
   })
 }, { deep: true })

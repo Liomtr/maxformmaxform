@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -147,21 +148,22 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, _from, next) => {
-  const token = localStorage.getItem('token')
+  const authStore = useAuthStore()
 
-  if (token && to.name === 'Login') {
+  if (authStore.token && !authStore.user) {
+    await authStore.fetchMe()
+  }
+
+  if (authStore.isLoggedIn && to.name === 'Login') {
     return next({ name: 'UserDashboard' })
   }
 
-  if (to.meta.requiresAuth && !token) {
+  if (to.meta.requiresAuth && !authStore.isLoggedIn) {
     return next({ name: 'Login', query: { redirect: to.fullPath } })
   }
 
-  if (to.meta.requiresAdmin) {
-    const role = localStorage.getItem('role') || 'user'
-    if (role !== 'admin') {
-      return next({ name: 'Forbidden' })
-    }
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    return next({ name: 'Forbidden' })
   }
 
   // Desktop/mobile survey auto-routing

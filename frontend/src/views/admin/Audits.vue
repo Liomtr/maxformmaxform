@@ -19,12 +19,12 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="a in list" :key="a.time + a.targetId + a.action">
-          <td>{{ a.time.replace('T',' ').slice(0,19) }}</td>
+        <tr v-for="a in list" :key="`${a.time || ''}${a.targetId || ''}${a.action}`">
+          <td>{{ a.time ? a.time.replace('T',' ').slice(0,19) : '-' }}</td>
           <td>{{ a.actor }}</td>
           <td>{{ a.action }}</td>
           <td>{{ a.targetType }}</td>
-          <td>{{ a.targetId }}</td>
+          <td>{{ a.targetId || '-' }}</td>
           <td>{{ a.detail || '-' }}</td>
         </tr>
       </tbody>
@@ -39,13 +39,13 @@
 </template>
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { fetchAudits } from '@/api/audits'
+import { fetchAudits, type AuditLogDTO } from '@/api/audits'
 const q = ref({ username:'', action:'', targetType:'' })
-const list = ref<any[]>([])
+const list = ref<AuditLogDTO[]>([])
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
-const load = async()=>{ const { data, total: t } = await fetchAudits({ page:page.value, pageSize:pageSize.value, username:q.value.username, action:q.value.action, targetType:q.value.targetType }); list.value = data; total.value = t }
+const load = async()=>{ const result = await fetchAudits({ page:page.value, pageSize:pageSize.value, username:q.value.username, action:q.value.action, targetType:q.value.targetType }); list.value = result.list; total.value = result.total }
 onMounted(load)
 </script>
 <style scoped>

@@ -1,0 +1,19 @@
+import type {
+  SurveyEditorAnswersPanelContract,
+  SurveyEditorLogicSettingsContract,
+  SurveyEditorPreviewPanelContract,
+  SurveyEditorPublishPanelContract,
+  SurveyEditorQuestionConfigPanelContract,
+  SurveyEditorQuestionListPanelContract,
+  SurveyEditorShellContract,
+  SurveyEditorToolbarContract
+} from '@/composables/useSurveyEditor'
+
+export type CreateSurveyPageShellContract = SurveyEditorShellContract
+export type CreateSurveyTopToolbarContract = SurveyEditorToolbarContract
+export type CreateSurveyPreviewPanelContract = SurveyEditorPreviewPanelContract
+export type CreateSurveyAnswersPanelContract = SurveyEditorAnswersPanelContract
+export type CreateSurveyQuestionConfigPanelContract = SurveyEditorQuestionConfigPanelContract
+export type CreateSurveyQuestionListPanelContract = SurveyEditorQuestionListPanelContract
+export type CreateSurveyPublishPanelContract = SurveyEditorPublishPanelContract
+export type CreateSurveyLogicSettingsContract = SurveyEditorLogicSettingsContract

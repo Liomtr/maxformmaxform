@@ -4,9 +4,15 @@
   "description": "问易答调查系统 后端",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "test": "node --test"
+    "start": "node ./scripts/start-prod.js",
+    "start:prod": "node ./scripts/start-prod.js",
+    "dev": "node --watch ./scripts/start-dev.js",
+    "dev:once": "node ./scripts/start-dev.js",
+    "test": "node --test --test-concurrency=1",
+    "db:migrate": "node scripts/db-migrate.js",
+    "db:seed": "node scripts/db-seed.js",
+    "db:seed:dev": "node scripts/db-seed.js",
+    "db:seed:init-admin": "node initAdmin.js"
   },
   "dependencies": {
     "archiver": "^7.0.1",

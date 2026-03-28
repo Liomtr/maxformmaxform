@@ -40,6 +40,7 @@ const create = async () => {
 }
 
 const remove = async (id: number) => {
+  if (!window.confirm(`确认删除角色 #${id} 吗？`)) return
   await deleteRole(id)
   await load()
 }

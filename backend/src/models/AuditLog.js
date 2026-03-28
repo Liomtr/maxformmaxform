@@ -2,6 +2,10 @@ import knex from '../db/knex.js'
 
 const TABLE = 'audit_logs'
 
+function getDb(options = {}) {
+  return options.db || knex
+}
+
 function toDto(row) {
   if (!row) return null
   return {
@@ -18,8 +22,9 @@ function toDto(row) {
 }
 
 const AuditLog = {
-  async create({ actor_id, actor_username, action, target_type, target_id, detail }) {
-    const [id] = await knex(TABLE).insert({
+  async create({ actor_id, actor_username, action, target_type, target_id, detail }, options = {}) {
+    const db = getDb(options)
+    const [id] = await db(TABLE).insert({
       actor_id: actor_id ?? null,
       actor_username: actor_username || null,
       action,
@@ -27,7 +32,7 @@ const AuditLog = {
       target_id: target_id == null ? null : String(target_id),
       detail: detail || null
     })
-    return knex(TABLE).where('id', id).first().then(toDto)
+    return db(TABLE).where('id', id).first().then(toDto)
   },
 
   async list({ page = 1, pageSize = 20, username, action, targetType } = {}) {

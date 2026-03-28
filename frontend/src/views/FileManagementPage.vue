@@ -49,6 +49,7 @@ async function load() {
 }
 
 async function remove(id: number) {
+  if (!window.confirm(`确认删除附件 #${id} 吗？该操作不可恢复。`)) return
   await http.delete(`/files/${id}`)
   await load()
 }

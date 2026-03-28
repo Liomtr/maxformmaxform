@@ -44,10 +44,10 @@
     </nav>
 
     <div class="toolbar__actions">
-      <button class="toolbar__btn" type="button" @click="$emit('save')" :disabled="saving">
+      <button data-testid="editor-save-button" class="toolbar__btn" type="button" @click="$emit('save')" :disabled="saving">
         {{ saving ? '保存中…' : '保存草稿' }}
       </button>
-      <button class="toolbar__btn toolbar__btn--primary" type="button" @click="$emit('publish')" :disabled="!canPublish">
+      <button data-testid="editor-publish-button" class="toolbar__btn toolbar__btn--primary" type="button" @click="$emit('publish')" :disabled="!canPublish">
         发布问卷
       </button>
     </div>
@@ -60,7 +60,6 @@ import { computed, defineProps, defineEmits } from 'vue'
 type TabKey = 'edit'|'preview'|'settings'|'share'|'answers'
 
 const props = defineProps<{
-  title: string
   currentTab: TabKey
   saving?: boolean
   canPublish?: boolean

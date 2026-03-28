@@ -2,9 +2,14 @@ import knex from '../db/knex.js'
 
 const TABLE = 'files'
 
+function getDb(options = {}) {
+  return options.db || knex
+}
+
 const File = {
-  async findById(id) {
-    return knex(TABLE).where('id', id).first()
+  async findById(id, options = {}) {
+    const db = getDb(options)
+    return db(TABLE).where('id', id).first()
   },
 
   async findByIds(ids = [], { survey_id } = {}) {
@@ -25,14 +30,16 @@ const File = {
       .then(row => Number(row?.cnt || 0))
   },
 
-  async create({ name, url, size, type, uploader_id, survey_id = null, public_token = null, question_order = null, submission_token = null, answer_id = null }) {
-    const [id] = await knex(TABLE).insert({ name, url, size, type, uploader_id, survey_id, public_token, question_order, submission_token, answer_id })
-    return File.findById(id)
+  async create({ name, url, size, type, uploader_id, survey_id = null, public_token = null, question_order = null, submission_token = null, answer_id = null }, options = {}) {
+    const db = getDb(options)
+    const [id] = await db(TABLE).insert({ name, url, size, type, uploader_id, survey_id, public_token, question_order, submission_token, answer_id })
+    return File.findById(id, options)
   },
 
-  async attachToAnswer(ids = [], answer_id) {
+  async attachToAnswer(ids = [], answer_id, options = {}) {
+    const db = getDb(options)
     if (!Array.isArray(ids) || ids.length === 0) return 0
-    return knex(TABLE)
+    return db(TABLE)
       .whereIn('id', ids)
       .update({ answer_id, submission_token: null })
   },
@@ -52,9 +59,38 @@ const File = {
       .whereNull('answer_id')
   },
 
-  async deleteByIds(ids = []) {
+  async listBySurveyIds(surveyIds = [], options = {}) {
+    const db = getDb(options)
+    if (!Array.isArray(surveyIds) || surveyIds.length === 0) return []
+    return db(TABLE)
+      .whereIn('survey_id', surveyIds)
+      .orderBy([{ column: 'survey_id', order: 'asc' }, { column: 'id', order: 'asc' }])
+  },
+
+  async listByAnswerIds(answerIds = [], options = {}) {
+    const db = getDb(options)
+    if (!Array.isArray(answerIds) || answerIds.length === 0) return []
+    return db(TABLE)
+      .whereIn('answer_id', answerIds)
+      .orderBy([{ column: 'answer_id', order: 'asc' }, { column: 'id', order: 'asc' }])
+  },
+
+  async deleteByIds(ids = [], options = {}) {
+    const db = getDb(options)
     if (!Array.isArray(ids) || ids.length === 0) return 0
-    return knex(TABLE).whereIn('id', ids).del()
+    return db(TABLE).whereIn('id', ids).del()
+  },
+
+  async deleteBySurveyIds(surveyIds = [], options = {}) {
+    const db = getDb(options)
+    if (!Array.isArray(surveyIds) || surveyIds.length === 0) return 0
+    return db(TABLE).whereIn('survey_id', surveyIds).del()
+  },
+
+  async deleteByAnswerIds(answerIds = [], options = {}) {
+    const db = getDb(options)
+    if (!Array.isArray(answerIds) || answerIds.length === 0) return 0
+    return db(TABLE).whereIn('answer_id', answerIds).del()
   },
 
   async delete(id) {

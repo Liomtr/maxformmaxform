@@ -1,112 +1,28 @@
-export interface QuestionOption {
-  label: string
-  value: string
-  order?: number
-  text?: string
-  rich?: boolean
-  desc?: string
-  hidden?: boolean
-  visibleWhen?: unknown[]
-  exclusive?: boolean
-  defaultSelected?: boolean
-  quotaLimit?: number
-  quotaUsed?: number
-  quotaEnabled?: boolean
-  fillEnabled?: boolean
-  fillRequired?: boolean
-  fillPlaceholder?: string
-  __groupHeader?: string
-  __quotaFull?: boolean
-  __remaining?: number | null
-}
+import type {
+  MatrixQuestionConfigDTO,
+  QuestionDTO,
+  QuestionOptionDTO,
+  SurveyDTO,
+  SurveyFormDTO,
+  SurveySettingsDTO,
+  SurveyStyleDTO,
+  UploadQuestionConfigDTO
+} from '../../../shared/survey.contract.js'
 
-export interface UploadQuestionConfig {
-  maxFiles?: number
-  maxSizeMb?: number
-  accept?: string
-}
+export type QuestionOption = QuestionOptionDTO
 
-export interface MatrixQuestionConfig {
-  rows?: QuestionOption[] | string[]
-  selectionType?: 'single' | 'multiple'
-}
+export type UploadQuestionConfig = UploadQuestionConfigDTO
+
+export type MatrixQuestionConfig = MatrixQuestionConfigDTO
 
 export type LegacyQuestionType = number
 
-export interface Question {
-  id: string
-  type: string | number
-  uiType?: number
-  title: string
-  titleHtml?: string
-  description?: string
-  required?: boolean
-  options?: QuestionOption[]
-  optionOrder?: 'none' | 'all' | 'flip' | 'firstFixed' | 'lastFixed'
-  validation?: Record<string, unknown>
-  upload?: UploadQuestionConfig
-  matrix?: MatrixQuestionConfig
-  logic?: Record<string, unknown>
-  examConfig?: { score?: number; correctAnswer?: unknown }
-  jumpLogic?: Record<string, unknown>
-  optionGroups?: unknown[]
-  hideSystemNumber?: boolean
-  quotasEnabled?: boolean
-  quotaMode?: string
-  quotaShowRemaining?: boolean
-  quotaFullText?: string
-  autoSelectOnAppear?: boolean
-  order?: number
-}
+export type Question = QuestionDTO
 
-export interface SurveySettings {
-  showProgress?: boolean
-  allowMultipleSubmissions?: boolean
-  endTime?: string
-  examMode?: boolean
-  timeLimit?: number
-  submitOnce?: boolean
-  randomOrder?: boolean
-  randomizeQuestions?: boolean
-  collectIP?: boolean
-}
+export type SurveySettings = SurveySettingsDTO
 
-export interface SurveyStyle {
-  theme?: string
-  backgroundColor?: string
-  headerImage?: string
-}
+export type SurveyStyle = SurveyStyleDTO
 
-export interface Survey {
-  id: number
-  title: string
-  description?: string
-  creator_id: number
-  questions: Question[]
-  settings?: SurveySettings
-  style?: SurveyStyle
-  share_code?: string
-  status: 'draft' | 'published' | 'closed'
-  response_count: number
-  created_at: string
-  updated_at: string
-  shareId?: string
-  answerCount?: number
-  responseCount?: number
-  createdById?: number
-  createdBy?: string
-  createdAt?: string
-  updatedAt?: string
-  publishedAt?: string
-  closedAt?: string
-  deletedAt?: string
-  auditAt?: string
-  lastSubmitAt?: string
-  submitCount?: number
-  auditStatus?: string
-  logs?: Array<{ time?: string; actor?: string; action?: string; detail?: string }>
-  type?: string
-  endTime?: string
-}
+export type Survey = SurveyDTO
 
-export type SurveyForm = Pick<Survey, 'title' | 'description' | 'questions' | 'settings' | 'style'>
+export type SurveyForm = SurveyFormDTO

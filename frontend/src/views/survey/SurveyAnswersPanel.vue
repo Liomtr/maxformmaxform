@@ -9,6 +9,7 @@
         <button
           v-for="item in sidebarItems"
           :key="item.key"
+          :data-testid="`results-nav-${item.key}`"
           :class="['sidebar-link', { active: currentSection === item.key }]"
           @click="currentSection = item.key"
         >
@@ -140,10 +141,11 @@
           </div>
         </header>
 
-        <div v-if="analysisQuestions.length" class="analysis-list">
+        <div v-if="analysisQuestions.length" class="analysis-list" data-testid="results-analysis-list">
           <article
             v-for="(question, index) in analysisQuestions"
             :key="question.questionId"
+            :data-testid="`results-analysis-question-${question.questionId}`"
             class="question-analytics"
           >
             <header class="question-analytics__header">
@@ -487,6 +489,7 @@ import { useRouter } from 'vue-router'
 import { downloadSurveyAttachmentsZip, downloadSurveyExcel } from '@/api/surveyAnswers'
 import { getResults as getSurveyStatistics, type SurveyResults } from '@/api/surveys'
 import { echarts } from '@/utils/echarts'
+import type { AnswerStats, SurveyAnswersPanelContract } from './surveyAnswersPanelContract'
 import {
   getQuestionStatAverageLabel as getSharedQuestionStatAverageLabel,
   getQuestionStatDistributionLabel as getSharedQuestionStatDistributionLabel,
@@ -500,18 +503,6 @@ type QuestionType = 'choice' | 'text' | 'rating' | 'metric' | 'files' | 'matrix'
 type SectionKey = 'summary' | 'analysis' | 'download' | 'advanced'
 type SystemTab = '设备' | '浏览器' | '操作系统'
 type AnalysisViewMode = '表格' | '明细' | '饼状' | '条形' | '折线'
-
-interface AnswerStats {
-  total: number
-  today: number
-  avgScore: number
-  completionRate?: number
-  completed?: number
-  incomplete?: number
-  avgTime?: string
-  pageViews?: number
-  avgDuration?: string
-}
 
 interface QuestionOption {
   label: string
@@ -594,14 +585,7 @@ function isCategoryStatItem(value: CategoryStatItem | null): value is CategorySt
   return value !== null
 }
 
-const props = withDefaults(defineProps<{
-  stats?: AnswerStats
-  surveyId?: string
-  questions?: any[]
-  surveyTitle?: string
-  collectionRange?: string
-  initialResults?: SurveyResults | null
-}>(), {
+const props = withDefaults(defineProps<SurveyAnswersPanelContract>(), {
   stats: () => ({
     total: 0,
     today: 0,

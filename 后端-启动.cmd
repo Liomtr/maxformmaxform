@@ -12,8 +12,10 @@ set "DB_PASSWORD=123456"
 set "DB_NAME=survey_system"
 set "FRONTEND_URL=http://127.0.0.1:63000"
 set "PORT=63002"
+set "NODE_ENV=development"
 
 echo [INFO] Project root: %ROOT%
+echo [INFO] Mode: development ^(watch enabled via npm run dev^)
 
 where node >nul 2>nul || (
   echo [ERROR] Node.js was not found. Please install Node 18+ first.
@@ -75,7 +77,7 @@ echo [INFO] Test accounts:
 echo        admin / 123456
 echo        test1 / 123456
 
-node server.js
+call npm run dev
 set "EXIT_CODE=%ERRORLEVEL%"
 
 popd

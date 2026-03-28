@@ -1,5 +1,5 @@
 <template>
-  <div class="results-page">
+  <div class="results-page" data-testid="results-page">
     <div v-if="loading" class="state-card">
       <h2>加载中</h2>
       <p>正在读取问卷结果和统计信息。</p>
@@ -19,7 +19,7 @@
       <section class="hero-card">
         <div>
           <p class="eyebrow">问卷结果</p>
-          <h1>{{ survey.title }}</h1>
+          <h1 data-testid="results-hero-title">{{ survey.title }}</h1>
           <p class="meta">
             <span>状态：{{ survey.status }}</span>
             <span>创建时间：{{ formatDateTime(survey.createdAt || survey.created_at) }}</span>
@@ -29,27 +29,20 @@
         <div class="hero-stats">
           <div class="hero-stat">
             <span class="hero-stat-label">总提交</span>
-            <strong>{{ results.totalSubmissions }}</strong>
+            <strong data-testid="results-total-submissions">{{ results.totalSubmissions }}</strong>
           </div>
           <div class="hero-stat">
             <span class="hero-stat-label">今日新增</span>
-            <strong>{{ results.today }}</strong>
+            <strong data-testid="results-today">{{ results.today }}</strong>
           </div>
           <div class="hero-stat">
             <span class="hero-stat-label">完成率</span>
-            <strong>{{ results.completionRate }}%</strong>
+            <strong data-testid="results-completion-rate">{{ results.completionRate }}%</strong>
           </div>
         </div>
       </section>
 
-      <SurveyAnswersPanel
-        :survey-id="String(survey.id)"
-        :questions="survey.questions"
-        :stats="panelStats"
-        :survey-title="survey.title"
-        :collection-range="collectionRange"
-        :initial-results="results"
-      />
+      <SurveyAnswersPanel v-bind="answersPanelProps || {}" />
     </div>
   </div>
 </template>
@@ -60,6 +53,7 @@ import { useRoute } from 'vue-router'
 import SurveyAnswersPanel from './SurveyAnswersPanel.vue'
 import { getResults, getSurvey, type SurveyResults } from '@/api/surveys'
 import type { Survey } from '@/types/survey'
+import { createSurveyAnswersPanelContractFromResults } from './surveyAnswersPanelContract'
 
 const route = useRoute()
 const loading = ref(true)
@@ -67,39 +61,19 @@ const survey = ref<Survey | null>(null)
 const results = ref<SurveyResults | null>(null)
 const errorMsg = ref('')
 
-const panelStats = computed(() => {
-  if (!results.value) return undefined
-  return {
-    total: results.value.total,
-    today: results.value.today,
-    avgScore: results.value.avgScore || 0,
-    completionRate: results.value.completionRate,
-    completed: results.value.completed,
-    incomplete: results.value.incomplete,
-    avgTime: results.value.avgDuration || (results.value.avgTime != null ? `${results.value.avgTime}s` : '-'),
-    avgDuration: results.value.avgDuration || '-'
-  }
-})
-
-const collectionRange = computed(() => {
-  if (!survey.value) return ''
-  const start = formatDateOnly(survey.value.createdAt || survey.value.created_at)
-  const end = formatDateOnly(results.value?.lastSubmitAt) || '至今'
-  return `${start} 至 ${end}`
+const answersPanelProps = computed(() => {
+  if (!survey.value || !results.value) return null
+  return createSurveyAnswersPanelContractFromResults({
+    survey: survey.value,
+    results: results.value
+  })
 })
 
 function formatDateTime(value?: string | null) {
-  if (!value) return '—'
+  if (!value) return '--'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('zh-CN', { hour12: false })
-}
-
-function formatDateOnly(value?: string | null) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('zh-CN')
 }
 
 onMounted(async () => {

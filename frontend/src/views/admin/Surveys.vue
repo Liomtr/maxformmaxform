@@ -52,6 +52,7 @@ const view = async (id: number) => {
 }
 
 const remove = async (id: number) => {
+  if (!window.confirm(`确认删除问卷 #${id} 吗？该操作会将其移入回收站。`)) return
   await deleteSurvey(id)
   await load()
 }

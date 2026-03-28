@@ -1,21 +1,21 @@
 import http from './http'
 import type { ApiResponse } from '../types/api'
-import type { Role } from '../types/user'
+import type { RoleDTO, RoleFormDTO } from '../../../shared/management.contract.js'
 
-export type RoleDTO = Role
+export type { RoleDTO, RoleFormDTO }
 
-export async function listRoles(): Promise<Role[]> {
-  const { data } = await http.get<ApiResponse<Role[]>>('/roles')
+export async function listRoles(): Promise<RoleDTO[]> {
+  const { data } = await http.get<ApiResponse<RoleDTO[]>>('/roles')
   return data.data!
 }
 
-export async function createRole(payload: { name: string; code: string; permissions?: string[]; remark?: string }): Promise<Role> {
-  const { data } = await http.post<ApiResponse<Role>>('/roles', payload)
+export async function createRole(payload: RoleFormDTO): Promise<RoleDTO> {
+  const { data } = await http.post<ApiResponse<RoleDTO>>('/roles', payload)
   return data.data!
 }
 
-export async function updateRole(id: number, payload: { name?: string; permissions?: string[]; remark?: string }): Promise<Role> {
-  const { data } = await http.put<ApiResponse<Role>>(`/roles/${id}`, payload)
+export async function updateRole(id: number, payload: Partial<RoleFormDTO>): Promise<RoleDTO> {
+  const { data } = await http.put<ApiResponse<RoleDTO>>(`/roles/${id}`, payload)
   return data.data!
 }
 

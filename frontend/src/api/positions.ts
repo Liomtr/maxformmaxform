@@ -1,14 +1,8 @@
 import http from './http'
 import type { ApiResponse } from '../types/api'
+import type { PositionDTO } from '../../../shared/management.contract.js'
 
-export interface PositionDTO {
-  id?: number
-  name: string
-  code?: string
-  is_virtual?: boolean
-  isVirtual?: boolean
-  remark?: string
-}
+export type { PositionDTO }
 
 export async function listPositions(): Promise<PositionDTO[]> {
   const { data } = await http.get<ApiResponse<PositionDTO[]>>('/positions')

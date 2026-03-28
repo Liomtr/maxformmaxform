@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
+    "start:prod": "vite preview --host localhost --port 63000 --strictPort",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
     "smoke:system": "node ../scripts/system-smoke.mjs",
     "test:e2e": "playwright test"

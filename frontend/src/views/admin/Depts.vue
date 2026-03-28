@@ -42,6 +42,7 @@ const create = async () => {
 }
 
 const remove = async (id: number) => {
+  if (!window.confirm(`确认删除部门 #${id} 吗？`)) return
   await deleteDept(id)
   await load()
 }

@@ -1,4 +1,3 @@
-import bcrypt from 'bcryptjs'
 import knex from './knex.js'
 
 export async function migrate() {
@@ -88,6 +87,22 @@ export async function migrate() {
       t.datetime('submitted_at').defaultTo(knex.fn.now())
       t.index('survey_id')
       t.index('submitted_at')
+    })
+  }
+
+  if (!await knex.schema.hasTable('survey_results_snapshots')) {
+    await knex.schema.createTable('survey_results_snapshots', t => {
+      t.increments('id').unsigned()
+      t.integer('survey_id').unsigned().notNullable().unique()
+      t.json('payload').notNullable()
+      t.integer('answer_count').notNullable().defaultTo(0)
+      t.integer('latest_answer_id').unsigned().nullable()
+      t.datetime('latest_submitted_at').nullable()
+      t.datetime('survey_updated_at').nullable()
+      t.datetime('created_at').defaultTo(knex.fn.now())
+      t.datetime('updated_at').defaultTo(knex.fn.now())
+      t.index('survey_id')
+      t.index('updated_at')
     })
   }
 
@@ -222,47 +237,4 @@ export async function migrate() {
   }
 
   console.log('Database schema ensured')
-}
-
-export async function seed() {
-  let adminRole = await knex('roles').where('code', 'admin').first()
-  if (!adminRole) {
-    await knex('roles').insert([
-      { name: '管理员', code: 'admin', permissions: JSON.stringify(['*']) },
-      { name: '普通用户', code: 'user', permissions: JSON.stringify(['survey:create', 'survey:edit', 'survey:view', 'answer:view']) }
-    ])
-    console.log('Default roles seeded')
-    adminRole = await knex('roles').where('code', 'admin').first()
-  }
-
-  const userRole = await knex('roles').where('code', 'user').first()
-  const passwordHash = await bcrypt.hash('123456', 10)
-  const accounts = [
-    { username: 'admin', email: 'admin@example.com', role_id: adminRole?.id },
-    { username: 'test1', email: 'test1@example.com', role_id: userRole?.id }
-  ]
-
-  for (const account of accounts) {
-    const existing = await knex('users').where('username', account.username).first()
-    const payload = {
-      email: account.email,
-      role_id: account.role_id,
-      password: passwordHash,
-      is_active: true,
-      updated_at: knex.fn.now()
-    }
-
-    if (existing) {
-      await knex('users').where('id', existing.id).update(payload)
-      continue
-    }
-
-    await knex('users').insert({
-      username: account.username,
-      ...payload,
-      created_at: knex.fn.now()
-    })
-  }
-
-  console.log('Default test users ensured')
 }

@@ -382,20 +382,23 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { reactive, ref, onMounted, watchEffect, computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
 import '../styles/design-tokens.css'
 const router = useRouter()
+const authStore = useAuthStore()
+const { isLoggedIn, user, username } = storeToRefs(authStore)
 // 深色模式开关（带持久化），用于顶部导航右侧切换与整体配色
 const isDark = ref(localStorage.getItem('home:isDark') === '1')
 watchEffect(() => localStorage.setItem('home:isDark', isDark.value ? '1' : '0'))
 // 顶部左侧品牌图片加载失败时，回退到内联 SVG
 const brandImgError = ref(false)
-const isAuthed = computed(()=> !!localStorage.getItem('token'))
-const storedUser = ref(localStorage.getItem('rememberUser') || '用户')
-const displayName = computed(()=> storedUser.value || '用户')
+const isAuthed = computed(() => isLoggedIn.value)
+const displayName = computed(() => username.value || localStorage.getItem('rememberUser') || '用户')
 const userInitial = computed(()=> displayName.value.substring(0,1).toUpperCase())
 const goEntry = () => { if (isAuthed.value) return router.push('/user-dashboard'); router.push('/login') }
 const goDashboard = () => router.push('/user-dashboard')
-const logout = () => { localStorage.removeItem('token'); localStorage.removeItem('role'); router.replace('/login') }
+const logout = () => { authStore.logout(); router.replace('/login') }
 const scrollTo = (sel: string) => document.querySelector(sel)?.scrollIntoView({ behavior:'smooth' })
 const scrollToTop = () => window.scrollTo({ top:0, behavior:'smooth' })
 const bulletMap:Record<string,string> = {
@@ -427,6 +430,9 @@ const updateActiveBullet = () => {
   if(current && current !== activeBullet.value) activeBullet.value = current
 }
 onMounted(()=> {
+  if (isLoggedIn.value && !user.value) {
+    authStore.fetchMe()
+  }
   updateActiveBullet()
   window.addEventListener('scroll', updateActiveBullet, { passive:true })
   // feature detect for background-clip:text (some legacy browsers)

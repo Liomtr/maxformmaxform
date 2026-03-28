@@ -9,8 +9,12 @@ export const useAuthStore = defineStore('auth', () => {
   const role = ref<Role | null>(null)
 
   const isLoggedIn = computed(() => !!token.value)
-  const isAdmin = computed(() => role.value?.code === 'admin')
-  const username = computed(() => user.value?.username || '')
+  const roleCode = computed(() => role.value?.code || '')
+  const permissions = computed(() => role.value?.permissions || [])
+  const isAdmin = computed(() => roleCode.value === 'admin' || permissions.value.includes('*'))
+  const roleLabel = computed(() => isAdmin.value ? '管理员' : '普通用户')
+  const identityCode = computed(() => isAdmin.value ? 'PROJECT_ADMIN' : 'USER')
+  const username = computed(() => user.value?.nickname || user.value?.username || '')
 
   function setAuth(t: string, u: User) {
     token.value = t
@@ -47,10 +51,13 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await meApi()
       user.value = res.user
       role.value = res.role
-      localStorage.setItem('role', res.role?.code || 'user')
     } catch {
       clearAuth()
     }
+  }
+
+  function hasPermission(code: string) {
+    return isAdmin.value || permissions.value.includes(code)
   }
 
   function logout() {
@@ -59,7 +66,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token, user, role,
-    isLoggedIn, isAdmin, username,
+    isLoggedIn, roleCode, permissions, isAdmin, roleLabel, identityCode, username,
+    hasPermission,
     login, register, fetchMe, logout, clearAuth
   }
 })

@@ -1,43 +1,30 @@
 import http from './http'
 import type { ApiResponse } from '../types/api'
+import type { FolderDTO, FolderFormDTO } from '../../../shared/management.contract.js'
 
-export interface FolderDTO {
-  id: number
-  name: string
-  parentId?: number | null
-  surveyCount?: number
-}
-
-function mapFolder(folder: Record<string, unknown>): FolderDTO {
-  return {
-    id: Number(folder.id),
-    name: String(folder.name || ''),
-    parentId: folder.parentId == null ? null : Number(folder.parentId),
-    surveyCount: folder.surveyCount == null ? 0 : Number(folder.surveyCount)
-  }
-}
+export type { FolderDTO, FolderFormDTO }
 
 export async function listFolders(parentId?: number | null): Promise<FolderDTO[]> {
   const params = parentId === undefined
     ? undefined
     : { parentId: parentId === null ? 'null' : parentId }
-  const { data } = await http.get<ApiResponse<Record<string, unknown>[]>>('/folders', { params })
-  return (data.data || []).map(mapFolder)
+  const { data } = await http.get<ApiResponse<FolderDTO[]>>('/folders', { params })
+  return data.data || []
 }
 
 export async function listAllFolders(): Promise<FolderDTO[]> {
-  const { data } = await http.get<ApiResponse<Record<string, unknown>[]>>('/folders/all')
-  return (data.data || []).map(mapFolder)
+  const { data } = await http.get<ApiResponse<FolderDTO[]>>('/folders/all')
+  return data.data || []
 }
 
-export async function createFolder(payload: { name: string; parentId?: number | null }): Promise<FolderDTO> {
-  const { data } = await http.post<ApiResponse<Record<string, unknown>>>('/folders', payload)
-  return mapFolder(data.data || {})
+export async function createFolder(payload: FolderFormDTO): Promise<FolderDTO> {
+  const { data } = await http.post<ApiResponse<FolderDTO>>('/folders', payload)
+  return data.data!
 }
 
 export async function renameFolder(id: number, name: string): Promise<FolderDTO> {
-  const { data } = await http.put<ApiResponse<Record<string, unknown>>>(`/folders/${id}`, { name })
-  return mapFolder(data.data || {})
+  const { data } = await http.put<ApiResponse<FolderDTO>>(`/folders/${id}`, { name })
+  return data.data!
 }
 
 export async function deleteFolder(id: number): Promise<void> {

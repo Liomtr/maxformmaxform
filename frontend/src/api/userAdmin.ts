@@ -1,30 +1,31 @@
 import http from './http'
 import type { ApiResponse, PaginatedData } from '../types/api'
-import type { User } from '../types/user'
+import type {
+  UserDTO,
+  UserImportResultDTO,
+  UserListQueryDTO,
+  UserPageDTO
+} from '../../../shared/management.contract.js'
 
-export interface ImportUsersResult {
-  created: number
-  skipped: number
-  errors: Array<{ index?: number; row?: number; username?: string; reason: string }>
-}
+export type ImportUsersResult = UserImportResultDTO
 
-export async function fetchUsers(params?: Record<string, unknown>): Promise<PaginatedData<User>> {
-  const { data } = await http.get<ApiResponse<PaginatedData<User>>>('/users', { params })
+export async function fetchUsers(params?: UserListQueryDTO): Promise<PaginatedData<UserDTO>> {
+  const { data } = await http.get<ApiResponse<UserPageDTO>>('/users', { params })
   return data.data!
 }
 
-export async function getUser(id: number | string): Promise<User> {
-  const { data } = await http.get<ApiResponse<User>>(`/users/${id}`)
+export async function getUser(id: number | string): Promise<UserDTO> {
+  const { data } = await http.get<ApiResponse<UserDTO>>(`/users/${id}`)
   return data.data!
 }
 
-export async function createUser(payload: { username: string; password: string; email?: string; role_id?: number; dept_id?: number; position_id?: number | null }): Promise<User> {
-  const { data } = await http.post<ApiResponse<User>>('/users', payload)
+export async function createUser(payload: { username: string; password: string; email?: string; role_id?: number; dept_id?: number; position_id?: number | null }): Promise<UserDTO> {
+  const { data } = await http.post<ApiResponse<UserDTO>>('/users', payload)
   return data.data!
 }
 
-export async function updateUser(id: number | string, payload: Record<string, unknown>): Promise<User> {
-  const { data } = await http.put<ApiResponse<User>>(`/users/${id}`, payload)
+export async function updateUser(id: number | string, payload: Record<string, unknown>): Promise<UserDTO> {
+  const { data } = await http.put<ApiResponse<UserDTO>>(`/users/${id}`, payload)
   return data.data!
 }
 
@@ -76,7 +77,7 @@ export async function exportUsersXlsx(params?: Record<string, unknown>): Promise
 }
 
 export async function importUsers(list: Record<string, unknown>[]): Promise<ImportUsersResult> {
-  const { data } = await http.post<ApiResponse<ImportUsersResult>>('/users/import', { users: list })
+  const { data } = await http.post<ApiResponse<UserImportResultDTO>>('/users/import', { users: list })
   return data.data || { created: 0, skipped: list.length, errors: [] }
 }
 
