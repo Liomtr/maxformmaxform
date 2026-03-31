@@ -7,6 +7,7 @@ import {
   getAnswerForManagement,
   listAnswers
 } from '../src/services/answerQueryService.js'
+import { ANSWER_ERROR_CODES } from '../../shared/answer.contract.js'
 
 const originalAnswerCountBySurveyId = answerRepository.countBySurveyId
 const originalAnswerFindById = answerRepository.findById
@@ -26,7 +27,43 @@ test('listAnswers requires survey_id for non-admin actors', async () => {
       actor: { sub: 1, roleCode: 'user' },
       query: {}
     }),
-    error => error?.status === 400 && error?.body?.error?.code === 'VALIDATION'
+    error => error?.status === 400 && error?.body?.error?.code === ANSWER_ERROR_CODES.VALIDATION
+  )
+})
+
+test('listAnswers rejects invalid paging query structures', async () => {
+  await assert.rejects(
+    () => listAnswers({
+      actor: { sub: 1, roleCode: 'admin' },
+      query: { page: 'oops' }
+    }),
+    error => error?.status === 400
+      && error?.body?.error?.code === ANSWER_ERROR_CODES.VALIDATION
+      && /page must be a positive integer/i.test(error?.body?.error?.message || '')
+  )
+})
+
+test('listAnswers rejects invalid datetime query structures', async () => {
+  await assert.rejects(
+    () => listAnswers({
+      actor: { sub: 1, roleCode: 'admin' },
+      query: { startTime: 'not-a-date' }
+    }),
+    error => error?.status === 400
+      && error?.body?.error?.code === ANSWER_ERROR_CODES.VALIDATION
+      && /starttime must be a valid datetime/i.test(error?.body?.error?.message || '')
+  )
+})
+
+test('listAnswers rejects reversed datetime query ranges', async () => {
+  await assert.rejects(
+    () => listAnswers({
+      actor: { sub: 1, roleCode: 'admin' },
+      query: { startTime: '2026-04-01', endTime: '2026-03-01' }
+    }),
+    error => error?.status === 400
+      && error?.body?.error?.code === ANSWER_ERROR_CODES.VALIDATION
+      && /starttime must be earlier than or equal to endtime/i.test(error?.body?.error?.message || '')
   )
 })
 

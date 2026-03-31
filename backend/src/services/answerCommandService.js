@@ -1,9 +1,11 @@
-import { createResponseError } from '../http/errors.js'
+import { throwAnswerPolicyError } from '../http/answerErrors.js'
+import { getAnswerBatchDeletePolicy } from '../policies/answerPolicy.js'
 import answerRepository from '../repositories/answerRepository.js'
 import surveyAggregateRepository from '../repositories/surveyAggregateRepository.js'
+import { normalizeAnswerIds } from '../utils/answerPayload.js'
 import { removeUploadedFile } from '../utils/uploadStorage.js'
 import { getManagedSurveyForAnswerRequest } from './answerQueryService.js'
-import { SURVEY_ERROR_CODES } from '../../../shared/survey.contract.js'
+import { createAnswerBatchDeleteResult } from '../../../shared/answer.contract.js'
 
 function cleanupStoredFiles(files = []) {
   if (!Array.isArray(files) || files.length === 0) return
@@ -18,16 +20,12 @@ function cleanupStoredFiles(files = []) {
 }
 
 export async function deleteAnswersBatch({ actor, ids = [] }) {
-  if (!Array.isArray(ids) || ids.length === 0) {
-    throw createResponseError(400, {
-      success: false,
-      error: { code: SURVEY_ERROR_CODES.VALIDATION, message: 'ids is required' }
-    })
-  }
+  ids = normalizeAnswerIds(ids)
+  throwAnswerPolicyError(getAnswerBatchDeletePolicy(ids))
 
   const existingAnswers = await answerRepository.findByIds(ids)
   if (existingAnswers.length === 0) {
-    return { deleted: 0 }
+    return createAnswerBatchDeleteResult()
   }
 
   const surveyIds = [...new Set(existingAnswers.map(item => item.survey_id))]
@@ -43,5 +41,5 @@ export async function deleteAnswersBatch({ actor, ids = [] }) {
   })
 
   cleanupStoredFiles(filesToCleanup)
-  return { deleted }
+  return createAnswerBatchDeleteResult({ deleted })
 }

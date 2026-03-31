@@ -2,12 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import archiver from 'archiver'
 import ExcelJS from 'exceljs'
-import { createResponseError } from '../http/errors.js'
+import { throwAnswerPolicyError } from '../http/answerErrors.js'
+import { getAnswerAttachmentsAvailablePolicy } from '../policies/answerPolicy.js'
 import answerRepository from '../repositories/answerRepository.js'
 import fileRepository from '../repositories/fileRepository.js'
 import { UPLOAD_DIR } from '../utils/uploadStorage.js'
 import { getManagedSurveyForAnswerRequest } from './answerQueryService.js'
-import { SURVEY_ERROR_CODES } from '../../../shared/survey.contract.js'
 
 function resolveExistingAnswerFiles(files = []) {
   return files
@@ -63,13 +63,7 @@ export async function createSurveyAnswerAttachmentsArchive({ actor, surveyId, su
   const managedSurvey = await resolveManagedSurvey({ actor, surveyId, survey })
   const files = await fileRepository.listAnswerFilesBySurveyId(managedSurvey.id)
   const existingFiles = resolveExistingAnswerFiles(files)
-
-  if (existingFiles.length === 0) {
-    throw createResponseError(404, {
-      success: false,
-      error: { code: SURVEY_ERROR_CODES.NO_FILE, message: 'No answer attachments are available for download' }
-    })
-  }
+  throwAnswerPolicyError(getAnswerAttachmentsAvailablePolicy(existingFiles))
 
   const archive = archiver('zip', { zlib: { level: 9 } })
   for (const file of existingFiles) {

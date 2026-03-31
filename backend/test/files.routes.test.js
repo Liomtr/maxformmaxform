@@ -52,6 +52,15 @@ test('GET /api/files lists files through the query service flow', async () => {
   })
 })
 
+test('GET /api/files rejects invalid uploader_id query structure', async () => {
+  const { response, json } = await request('/files?uploader_id=abc')
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'MGMT_INVALID_PAYLOAD')
+  assert.match(json.error.message, /uploader_id must be an integer/i)
+})
+
 test('POST /api/files/upload saves the uploaded file through the command service flow', async () => {
   let createdPayload = null
   let uploadedFilePath = null
@@ -145,6 +154,15 @@ test('DELETE /api/files/:id returns management not found code for missing files'
   assert.equal(json.error.code, 'MGMT_FILE_NOT_FOUND')
 })
 
+test('DELETE /api/files/:id rejects invalid file id structure', async () => {
+  const { response, json } = await request('/files/abc', { method: 'DELETE' })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'MGMT_INVALID_PAYLOAD')
+  assert.match(json.error.message, /id must be an integer/i)
+})
+
 test('DELETE /api/files/:id removes the stored file from db and disk', async () => {
   const fixtureName = 'files-route-delete-fixture.txt'
   const fixturePath = `${UPLOAD_DIR}/${fixtureName}`
@@ -166,7 +184,7 @@ test('DELETE /api/files/:id removes the stored file from db and disk', async () 
 
     assert.equal(response.status, 200)
     assert.equal(json.success, true)
-    assert.equal(deletedId, '602')
+    assert.equal(deletedId, 602)
     assert.equal(fs.existsSync(fixturePath), false)
   } finally {
     if (fs.existsSync(fixturePath)) fs.unlinkSync(fixturePath)

@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { asyncRoute } from '../http/asyncRoute.js'
+import { throwManagementError } from '../http/managementErrors.js'
 import { authRequired } from '../middlewares/auth.js'
 import {
   createManagedFolder,
@@ -8,6 +9,8 @@ import {
   listManagedFolders,
   updateManagedFolder
 } from '../services/folderService.js'
+import { normalizeRequiredIntegerParam } from '../utils/routeParams.js'
+import { MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
 const router = Router()
 
@@ -29,12 +32,18 @@ router.post('/', asyncRoute(async (req, res) => {
 }))
 
 router.put('/:id', asyncRoute(async (req, res) => {
-  const folder = await updateManagedFolder({ actor: req.user, folderId: req.params.id, body: req.body })
+  const folderId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  const folder = await updateManagedFolder({ actor: req.user, folderId, body: req.body })
   res.json({ success: true, data: folder })
 }))
 
 router.delete('/:id', asyncRoute(async (req, res) => {
-  const result = await deleteManagedFolder({ actor: req.user, folderId: req.params.id })
+  const folderId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  const result = await deleteManagedFolder({ actor: req.user, folderId })
   res.json({ success: true, data: result })
 }))
 

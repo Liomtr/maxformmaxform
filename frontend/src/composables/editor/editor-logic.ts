@@ -1,8 +1,15 @@
 import { computed, reactive, ref, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { SurveyEditorForm } from './editor-core'
+import type { SurveyEditorForm, SurveyEditorQuestion } from './editor-core'
+import type {
+  QuestionJumpLogicDTO,
+  QuestionJumpTargetDTO,
+  QuestionLogicConditionDTO,
+  QuestionLogicOperatorDTO,
+  VisibleWhenDTO
+} from '../../../../shared/survey.contract.js'
 
-type UiCond = { depIdx: number; picked?: string[]; op?: string; text?: string }
+type UiCond = { depIdx: number; picked?: string[]; op?: QuestionLogicOperatorDTO; text?: string }
 
 interface EditorLogicOptions {
   surveyForm: SurveyEditorForm
@@ -24,21 +31,33 @@ export function useEditorLogic(options: EditorLogicOptions) {
   const jumpByOption = ref<Record<string, string>>({})
   const jumpUnconditionalTarget = ref('')
 
+  function toStringMap(entries: Record<string, QuestionJumpTargetDTO> | undefined) {
+    if (!entries) return {}
+    return Object.fromEntries(Object.entries(entries).map(([key, value]) => [key, String(value)]))
+  }
+
+  function normalizeJumpTarget(value: string): QuestionJumpTargetDTO | null {
+    const normalized = String(value || '').trim()
+    if (!normalized) return null
+    if (normalized === 'end' || normalized === 'invalid') return normalized
+    return /^\d+$/.test(normalized) ? (normalized as `${number}`) : null
+  }
+
   function selectablePrevQs(targetIdx: number) {
     return (surveyForm.questions || []).slice(0, targetIdx)
   }
 
   function openJumpDialog(index: number) {
     jumpTargetIndex.value = index
-    const question: any = surveyForm.questions[index]
+    const question = surveyForm.questions[index]
     jumpByOptionEnabled.value = true
     jumpUnconditionalEnabled.value = false
     jumpByOption.value = {}
     jumpUnconditionalTarget.value = ''
-    const jumpLogic: any = question?.jumpLogic
-    if (jumpLogic?.byOption && typeof jumpLogic.byOption === 'object') {
+    const jumpLogic = question?.jumpLogic
+    if (jumpLogic?.byOption) {
       jumpByOptionEnabled.value = true
-      jumpByOption.value = { ...jumpLogic.byOption }
+      jumpByOption.value = toStringMap(jumpLogic.byOption)
     }
     if (jumpLogic?.unconditional) {
       jumpUnconditionalEnabled.value = true
@@ -54,13 +73,19 @@ export function useEditorLogic(options: EditorLogicOptions) {
   function saveJumpDialog() {
     const index = jumpTargetIndex.value
     if (index == null) return
-    const question: any = surveyForm.questions[index]
-    const data: any = {}
+    const question = surveyForm.questions[index]
+    const data: QuestionJumpLogicDTO = {}
     if (jumpByOptionEnabled.value) {
-      data.byOption = Object.fromEntries(Object.entries(jumpByOption.value || {}).filter(([, value]) => String(value || '') !== ''))
+      const byOption = Object.fromEntries(
+        Object.entries(jumpByOption.value || {})
+          .map(([optionValue, target]) => [optionValue, normalizeJumpTarget(target)])
+          .filter((entry): entry is [string, QuestionJumpTargetDTO] => entry[1] !== null)
+      )
+      if (Object.keys(byOption).length > 0) data.byOption = byOption
     }
-    if (jumpUnconditionalEnabled.value && String(jumpUnconditionalTarget.value || '') !== '') {
-      data.unconditional = String(jumpUnconditionalTarget.value)
+    if (jumpUnconditionalEnabled.value) {
+      const unconditional = normalizeJumpTarget(jumpUnconditionalTarget.value)
+      if (unconditional) data.unconditional = unconditional
     }
     question.jumpLogic = data.byOption || data.unconditional ? data : undefined
     showJumpDialog.value = false
@@ -76,7 +101,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
     } catch {
       return
     }
-    surveyForm.questions.forEach((question: any) => {
+    surveyForm.questions.forEach(question => {
       if (question.logic) question.logic.visibleWhen = undefined
     })
     ElMessage.success('已清空所有题目的题目关联')
@@ -94,7 +119,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
     } catch {
       return
     }
-    const question: any = surveyForm.questions[index]
+    const question = surveyForm.questions[index]
     if (!question.logic) question.logic = {}
     question.logic.visibleWhen = undefined
     const prevQuestions = selectablePrevQs(index)
@@ -109,8 +134,8 @@ export function useEditorLogic(options: EditorLogicOptions) {
     logicTargetIndex.value = index
     editingIndex.value = index
     logicRows.splice(0, logicRows.length)
-    const question: any = surveyForm.questions[index]
-    const groups: any[] = question?.logic?.visibleWhen || []
+    const question = surveyForm.questions[index]
+    const groups = question?.logic?.visibleWhen || []
     if (Array.isArray(groups) && groups.length > 0) {
       groups.forEach(group => {
         const condition = Array.isArray(group) && group[0] ? group[0] : null
@@ -138,7 +163,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
         }
         logicRows.push({
           depIdx,
-          op: String(condition.op || 'eq'),
+          op: (condition.op || 'eq') as QuestionLogicOperatorDTO,
           text: Array.isArray(condition.value) ? String(condition.value[0] ?? '') : String(condition.value ?? '')
         })
       })
@@ -169,8 +194,8 @@ export function useEditorLogic(options: EditorLogicOptions) {
     else picked.push(text)
   }
 
-  function buildVisibleGroups(rows: UiCond[], prevQuestions: any[]) {
-    const groups: any[] = []
+  function buildVisibleGroups(rows: UiCond[], prevQuestions: SurveyEditorQuestion[]): VisibleWhenDTO {
+    const groups: VisibleWhenDTO = []
     for (const row of rows) {
       const depQuestion = prevQuestions[row.depIdx]
       if (!depQuestion) continue
@@ -178,7 +203,12 @@ export function useEditorLogic(options: EditorLogicOptions) {
       if (hasOptions) {
         if (!row.picked || row.picked.length === 0) continue
         const isMulti = Number(depQuestion.type) === 4
-        groups.push([{ qid: depQuestion.id, op: isMulti ? 'overlap' : 'in', value: [...row.picked] }])
+        const condition: QuestionLogicConditionDTO = {
+          qid: depQuestion.id,
+          op: isMulti ? 'overlap' : 'in',
+          value: [...row.picked]
+        }
+        groups.push([condition])
         continue
       }
       const op = row.op || 'eq'
@@ -192,7 +222,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
   function saveLogicDialog() {
     const index = logicTargetIndex.value
     if (index == null) return
-    const question: any = surveyForm.questions[index]
+    const question = surveyForm.questions[index]
     const groups = buildVisibleGroups(logicRows, selectablePrevQs(index))
     if (!question.logic) question.logic = {}
     question.logic.visibleWhen = groups.length ? groups : undefined
@@ -206,7 +236,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
 
   function openOptionLogicDialog(index: number) {
     if (index <= 0) return
-    const question: any = surveyForm.questions[index]
+    const question = surveyForm.questions[index]
     if (!Array.isArray(question.options) || question.options.length === 0) return
     optionTargetIndex.value = index
     editingIndex.value = index
@@ -224,14 +254,15 @@ export function useEditorLogic(options: EditorLogicOptions) {
   function hasOptionLogic(index: number) {
     const questionIndex = optionTargetIndex.value
     if (questionIndex == null) return false
-    const question: any = surveyForm.questions[questionIndex]
-    return Array.isArray(question?.optionLogic?.[index]) && question.optionLogic[index]?.length > 0
+    const question = surveyForm.questions[questionIndex]
+    const groups = question?.optionLogic?.[index]
+    return Array.isArray(groups) && groups.length > 0
   }
 
   function initOptionLogicRowsFromQuestion(qIndex: number, optIndex: number) {
     optionLogicRows.splice(0, optionLogicRows.length)
     const prevQuestions = selectablePrevQs(qIndex)
-    const groups: any[] = (surveyForm.questions[qIndex] as any)?.optionLogic?.[optIndex] || []
+    const groups = surveyForm.questions[qIndex]?.optionLogic?.[optIndex] || []
     if (Array.isArray(groups) && groups.length > 0) {
       groups.forEach(group => {
         const condition = Array.isArray(group) && group[0] ? group[0] : null
@@ -253,7 +284,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
         }
         optionLogicRows.push({
           depIdx,
-          op: String(condition.op || 'eq'),
+          op: (condition.op || 'eq') as QuestionLogicOperatorDTO,
           text: Array.isArray(condition.value) ? String(condition.value[0] ?? '') : String(condition.value ?? '')
         })
       })
@@ -300,7 +331,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
     } catch {
       return
     }
-    const question: any = surveyForm.questions[qIndex]
+    const question = surveyForm.questions[qIndex]
     if (!question.optionLogic) question.optionLogic = []
     question.optionLogic[activeOptIdx.value] = undefined
     optionLogicRows.splice(0, optionLogicRows.length)
@@ -321,7 +352,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
     } catch {
       return
     }
-    const question: any = surveyForm.questions[qIndex]
+    const question = surveyForm.questions[qIndex]
     if (!Array.isArray(question.options)) question.options = []
     question.optionLogic = new Array(question.options.length).fill(undefined)
     optionLogicRows.splice(0, optionLogicRows.length)
@@ -333,7 +364,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
   function saveCurrentOptionLogic(closeDialog: boolean) {
     const qIndex = optionTargetIndex.value
     if (qIndex == null) return
-    const question: any = surveyForm.questions[qIndex]
+    const question = surveyForm.questions[qIndex]
     const groups = buildVisibleGroups(optionLogicRows, selectablePrevQs(qIndex))
     if (!question.optionLogic) question.optionLogic = []
     question.optionLogic[activeOptIdx.value] = groups.length ? groups : undefined
@@ -391,8 +422,8 @@ export function useEditorLogic(options: EditorLogicOptions) {
   })
 
   function optionSummary(qIndex: number, optIndex: number): string {
-    const question: any = surveyForm.questions[qIndex]
-    const groups: any[] = question?.optionLogic?.[optIndex] || []
+    const question = surveyForm.questions[qIndex]
+    const groups = question?.optionLogic?.[optIndex] || []
     if (!Array.isArray(groups) || groups.length === 0) return ''
     const opMap: Record<string, string> = {
       eq: '等于',
@@ -407,11 +438,11 @@ export function useEditorLogic(options: EditorLogicOptions) {
     }
     const parts: string[] = []
     for (const group of groups) {
-      const condition: any = Array.isArray(group) && group[0] ? group[0] : null
+      const condition = Array.isArray(group) && group[0] ? group[0] : null
       if (!condition) continue
       let depIdx = surveyForm.questions.findIndex(item => String(item.id) === String(condition.qid))
       if (depIdx < 0 && /^\d+$/.test(String(condition.qid))) depIdx = Number(String(condition.qid)) - 1
-      const depQuestion: any = surveyForm.questions[depIdx]
+      const depQuestion = surveyForm.questions[depIdx]
       if (!depQuestion) continue
       const order = depIdx + 1
       const depTitle = depQuestion.title || getQuestionTypeLabel(depQuestion.type)
@@ -420,7 +451,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
         const picked = Array.isArray(condition.value) ? condition.value : []
         if (!picked.length) continue
         const indexes = picked
-          .map((value: any) => (depQuestion.options || []).findIndex((option: any) => String(option) === String(value)))
+          .map(value => (depQuestion.options || []).findIndex(option => String(option) === String(value)))
           .filter((index: number) => index >= 0)
           .map((index: number) => index + 1)
           .sort((a: number, b: number) => a - b)
@@ -436,8 +467,8 @@ export function useEditorLogic(options: EditorLogicOptions) {
   }
 
   function jumpSummary(qIndex: number, optIndex: number): string {
-    const question: any = surveyForm.questions[qIndex]
-    const jumpLogic: any = question?.jumpLogic
+    const question = surveyForm.questions[qIndex]
+    const jumpLogic = question?.jumpLogic
     if (!jumpLogic?.byOption) return ''
     const target = jumpLogic.byOption[String(optIndex + 1)]
     if (!target) return ''
@@ -452,8 +483,8 @@ export function useEditorLogic(options: EditorLogicOptions) {
   }
 
   function questionLogicSummary(qIndex: number): string {
-    const question: any = surveyForm.questions[qIndex]
-    const groups: any[] = question?.logic?.visibleWhen || []
+    const question = surveyForm.questions[qIndex]
+    const groups = question?.logic?.visibleWhen || []
     if (!Array.isArray(groups) || groups.length === 0) return ''
     const opMap: Record<string, string> = {
       eq: '等于',
@@ -470,11 +501,11 @@ export function useEditorLogic(options: EditorLogicOptions) {
     }
     const parts: string[] = []
     for (const group of groups) {
-      const condition: any = Array.isArray(group) && group[0] ? group[0] : null
+      const condition = Array.isArray(group) && group[0] ? group[0] : null
       if (!condition) continue
       let depIdx = surveyForm.questions.findIndex(item => String(item.id) === String(condition.qid))
       if (depIdx < 0 && /^\d+$/.test(String(condition.qid))) depIdx = Number(String(condition.qid)) - 1
-      const depQuestion: any = surveyForm.questions[depIdx]
+      const depQuestion = surveyForm.questions[depIdx]
       if (!depQuestion) continue
       const order = depIdx + 1
       const depTitle = depQuestion.title || getQuestionTypeLabel(depQuestion.type)
@@ -483,7 +514,7 @@ export function useEditorLogic(options: EditorLogicOptions) {
         const picked = Array.isArray(condition.value) ? condition.value : []
         if (!picked.length) continue
         const indexes = picked
-          .map((value: any) => (depQuestion.options || []).findIndex((option: any) => String(option) === String(value)))
+          .map(value => (depQuestion.options || []).findIndex(option => String(option) === String(value)))
           .filter((index: number) => index >= 0)
           .map((index: number) => index + 1)
           .sort((a: number, b: number) => a - b)

@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { asyncRoute } from '../http/asyncRoute.js'
+import { throwManagementError } from '../http/managementErrors.js'
 import { authRequired } from '../middlewares/auth.js'
 import {
   createManagedFlow,
@@ -7,6 +8,8 @@ import {
   listManagedFlows,
   updateManagedFlow
 } from '../services/flowService.js'
+import { normalizeRequiredIntegerParam } from '../utils/routeParams.js'
+import { MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
 const router = Router()
 
@@ -23,12 +26,18 @@ router.post('/', asyncRoute(async (req, res) => {
 }))
 
 router.put('/:id', asyncRoute(async (req, res) => {
-  const flow = await updateManagedFlow({ actor: req.user, flowId: req.params.id, body: req.body })
+  const flowId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  const flow = await updateManagedFlow({ actor: req.user, flowId, body: req.body })
   res.json({ success: true, data: flow })
 }))
 
 router.delete('/:id', asyncRoute(async (req, res) => {
-  await deleteManagedFlow({ actor: req.user, flowId: req.params.id })
+  const flowId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  await deleteManagedFlow({ actor: req.user, flowId })
   res.json({ success: true })
 }))
 

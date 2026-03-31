@@ -226,10 +226,54 @@ export async function migrate() {
       t.string('type', 50).nullable()
       t.string('difficulty', 50).nullable()
       t.decimal('score', 10, 2).nullable()
+      t.json('content').nullable()
       t.datetime('created_at').defaultTo(knex.fn.now())
       t.datetime('updated_at').defaultTo(knex.fn.now())
       t.index('repo_id')
     })
+  }
+
+  if (!await knex.schema.hasTable('management_ai_executions')) {
+    await knex.schema.createTable('management_ai_executions', t => {
+      t.increments('id').unsigned()
+      t.integer('actor_id').unsigned().notNullable()
+      t.string('idempotency_key', 120).notNullable()
+      t.string('action', 120).notNullable()
+      t.string('request_hash', 64).notNullable()
+      t.string('status', 20).notNullable().defaultTo('pending')
+      t.json('request_payload').nullable()
+      t.json('response_payload').nullable()
+      t.string('error_code', 80).nullable()
+      t.text('error_message').nullable()
+      t.datetime('created_at').defaultTo(knex.fn.now())
+      t.datetime('updated_at').defaultTo(knex.fn.now())
+      t.unique(['actor_id', 'idempotency_key'])
+      t.index('actor_id')
+      t.index('action')
+      t.index('status')
+      t.index('created_at')
+    })
+  }
+
+  if (!await knex.schema.hasTable('system_configs')) {
+    await knex.schema.createTable('system_configs', t => {
+      t.increments('id').unsigned()
+      t.string('config_key', 100).notNullable().unique()
+      t.json('config_value').nullable()
+      t.integer('updated_by').unsigned().nullable()
+      t.datetime('created_at').defaultTo(knex.fn.now())
+      t.datetime('updated_at').defaultTo(knex.fn.now())
+      t.index('config_key')
+      t.index('updated_by')
+    })
+  }
+
+  if (await knex.schema.hasTable('question_bank_questions')) {
+    if (!await knex.schema.hasColumn('question_bank_questions', 'content')) {
+      await knex.schema.alterTable('question_bank_questions', t => {
+        t.json('content').nullable()
+      })
+    }
   }
 
   if (!createdTables.surveys && await knex.schema.hasTable('surveys')) {

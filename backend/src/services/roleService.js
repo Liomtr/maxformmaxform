@@ -1,6 +1,12 @@
 import { throwManagementError, throwManagementPolicyError } from '../http/managementErrors.js'
 import { getAdminPolicy } from '../policies/adminPolicy.js'
 import roleRepository from '../repositories/roleRepository.js'
+import {
+  ensurePlainObjectPayload,
+  normalizeOptionalStringArray,
+  normalizeOptionalTrimmedString,
+  normalizeRequiredTrimmedString
+} from '../utils/managementPayload.js'
 import { recordManagementAction, runManagementTransaction } from './activity.js'
 import { createRoleDto, MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
@@ -16,12 +22,25 @@ export async function listManagedRoles({ actor }) {
 
 export async function createManagedRole({ actor, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
-    const { name, code, permissions, remark } = body
-    if (!name || !code) {
-      throwManagementError(400, MANAGEMENT_ERROR_CODES.ROLE_REQUIRED_FIELDS, 'Role name and code are required')
-    }
+    const name = normalizeRequiredTrimmedString(body.name, {
+      field: 'name',
+      code: MANAGEMENT_ERROR_CODES.ROLE_REQUIRED_FIELDS,
+      message: 'Role name and code are required'
+    })
+    const code = normalizeRequiredTrimmedString(body.code, {
+      field: 'code',
+      code: MANAGEMENT_ERROR_CODES.ROLE_REQUIRED_FIELDS,
+      message: 'Role name and code are required'
+    })
+    const permissions = normalizeOptionalStringArray(body.permissions, { field: 'permissions' })
+    const remark = normalizeOptionalTrimmedString(body.remark, {
+      field: 'remark',
+      allowNull: true,
+      emptyToNull: true
+    })
 
     const existing = await roleRepository.findByCode(code, { db })
     if (existing) {
@@ -52,12 +71,23 @@ export async function createManagedRole({ actor, body = {} }) {
 
 export async function updateManagedRole({ actor, roleId, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
     const role = await roleRepository.update(roleId, {
-      name: body.name,
-      permissions: body.permissions,
-      remark: body.remark
+      name: body.name === undefined
+        ? undefined
+        : normalizeRequiredTrimmedString(body.name, {
+            field: 'name',
+            code: MANAGEMENT_ERROR_CODES.ROLE_REQUIRED_FIELDS,
+            message: 'Role name and code are required'
+          }),
+      permissions: normalizeOptionalStringArray(body.permissions, { field: 'permissions' }),
+      remark: normalizeOptionalTrimmedString(body.remark, {
+        field: 'remark',
+        allowNull: true,
+        emptyToNull: true
+      })
     }, { db })
 
     if (!role) {

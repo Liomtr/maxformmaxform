@@ -6,7 +6,8 @@ import { mapLegacyTypeToServer, mapServerTypeToLegacy } from '@/mappers/surveyMa
 import {
   getLegacyQuestionConfigPanel,
   getLegacyQuestionTypeLabel,
-  legacyQuestionTypeHasOptions
+  legacyQuestionTypeHasOptions,
+  serverQuestionTypeHasOptions
 } from '@/utils/questionTypeRegistry'
 import { buildUploadQuestionHelpText, DEFAULT_UPLOAD_ACCEPT, normalizeUploadQuestionConfig, sanitizeUploadAccept } from '@/utils/uploadQuestion'
 import {
@@ -16,10 +17,34 @@ import {
   getLegacyQuestionOptionSuffix,
   isLegacyQuestionOfServerType
 } from '@/utils/questionEditorModel'
+import { formatAiSurveyIssues, isLikelyAiJsonInput, parseAiSurveyInput } from '@/utils/aiSurveySchema'
+import type { QuestionBankQuestionDTO, QuestionBankQuestionFormDTO } from '../../../../shared/management.contract.js'
+import type {
+  QuestionJumpLogicDTO,
+  QuestionLogicDTO,
+  QuestionOptionGroupDTO,
+  QuestionQuotaModeDTO,
+  VisibleWhenDTO
+} from '../../../../shared/survey.contract.js'
+
+export interface SurveyEditorOptionExtra {
+  quotaLimit: number
+  quotaEnabled: boolean
+  rich: boolean
+  hasDesc: boolean
+  desc: string
+  exclusive: boolean
+  defaultSelected: boolean
+  hidden: boolean
+  fillEnabled: boolean
+  fillRequired: boolean
+  fillPlaceholder: string
+}
 
 export interface SurveyEditorQuestion {
   id: string
   type: number
+  uiType?: number
   title: string
   titleHtml?: string
   description?: string
@@ -37,7 +62,24 @@ export interface SurveyEditorQuestion {
     maxSizeMb?: number
     accept?: string
   }
-  [key: string]: any
+  logic?: QuestionLogicDTO
+  jumpLogic?: QuestionJumpLogicDTO
+  optionGroups?: QuestionOptionGroupDTO[]
+  quotasEnabled?: boolean
+  quotaMode?: QuestionQuotaModeDTO
+  quotaShowRemaining?: boolean
+  quotaFullText?: string
+  groupOrderRandom?: boolean
+  groupFillRandom?: boolean
+  autoSelectOnAppear?: boolean
+  optionLogic?: Array<VisibleWhenDTO | undefined>
+  optionExtras?: SurveyEditorOptionExtra[]
+  examConfig?: {
+    score?: number
+    correctAnswer?: unknown
+  }
+  placeholder?: string
+  [key: string]: unknown
 }
 
 export interface SurveyEditorForm {
@@ -53,6 +95,29 @@ export interface SurveyEditorForm {
     submitOnce: boolean
   }
   questions: SurveyEditorQuestion[]
+}
+
+export interface QuestionBankExportMetadata {
+  tags?: string[]
+  knowledgePoints?: string[]
+  applicableScenes?: string[]
+  aiMeta?: Record<string, unknown>
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function cloneJsonValue<T>(value: T): T {
+  if (value == null) return value
+  if (Array.isArray(value)) return value.map(item => cloneJsonValue(item)) as T
+  if (isPlainObject(value)) {
+    return Object.keys(value).reduce((result, key) => {
+      result[key] = cloneJsonValue((value as Record<string, any>)[key])
+      return result
+    }, {} as Record<string, any>) as T
+  }
+  return value
 }
 
 export function useEditorCore() {
@@ -263,6 +328,122 @@ export function useEditorCore() {
 
   function createDefaultQuestion(type: number): SurveyEditorQuestion {
     return buildLegacyQuestion(type)
+  }
+
+  function buildEditorQuestionFromServerQuestion(question: any): SurveyEditorQuestion {
+    return {
+      id: question.id ? String(question.id) : generateQuestionId(),
+      type: mapServerTypeToLegacy(question.type || 'input', question.uiType),
+      uiType: question.uiType == null ? undefined : Number(question.uiType),
+      title: question.title || '',
+      ...(question.titleHtml ? { titleHtml: question.titleHtml } : {}),
+      description: question.description || '',
+      required: !!question.required,
+      validation: question.validation || undefined,
+      matrix: question.matrix
+        ? {
+            rows: Array.isArray(question.matrix.rows) ? question.matrix.rows.map((row: any) => row.label ?? String(row)) : [],
+            selectionType: question.matrix.selectionType === 'multiple' ? 'multiple' : 'single'
+          }
+        : undefined,
+      hideSystemNumber: !!question.hideSystemNumber,
+      quotasEnabled: !!question.quotasEnabled,
+      quotaMode: (question as any).quotaMode || 'explicit',
+      quotaFullText: (question as any).quotaFullText || '名额已满',
+      quotaShowRemaining: !!(question as any).quotaShowRemaining,
+      options: Array.isArray(question.options) ? question.options.map((option: any) => option.label ?? String(option)) : undefined,
+      optionOrder: (question.optionOrder as any) || 'none',
+      optionGroups: Array.isArray(question.optionGroups)
+        ? question.optionGroups
+            .map((group: any) => ({
+              name: String(group?.name ?? ''),
+              from: Number(group?.from ?? NaN),
+              to: Number(group?.to ?? NaN),
+              random: !!group?.random
+            }))
+            .filter((group: any) => Number.isFinite(group.from) && Number.isFinite(group.to) && group.from >= 1 && group.to >= group.from)
+        : [],
+      groupOrderRandom: !!question.groupOrderRandom,
+      autoSelectOnAppear: !!question.autoSelectOnAppear,
+      jumpLogic: question.jumpLogic,
+      optionLogic: [],
+      optionExtras: Array.isArray(question.options)
+        ? question.options.map((option: any) => ({
+            quotaLimit: Number(option.quotaLimit || 0),
+            quotaEnabled: option.quotaEnabled !== false,
+            rich: !!option.rich,
+            hasDesc: !!option.desc,
+            desc: option.desc || '',
+            exclusive: !!option.exclusive,
+            defaultSelected: !!option.defaultSelected,
+            hidden: !!option.hidden,
+            fillEnabled: !!option.fillEnabled,
+            fillRequired: !!option.fillRequired,
+            fillPlaceholder: option.fillPlaceholder || ''
+          }))
+        : [],
+      examConfig: isPlainObject(question.examConfig)
+        ? {
+            score: Number(question.examConfig.score || 0),
+            correctAnswer: cloneJsonValue(question.examConfig.correctAnswer)
+          }
+        : undefined
+    }
+  }
+
+  function buildEditorQuestionFromQuestionBank(question: QuestionBankQuestionDTO): SurveyEditorQuestion {
+    const content = question.content
+    const surveyQuestion = content && isPlainObject(content.surveyQuestion) ? content.surveyQuestion : null
+
+    if (surveyQuestion) {
+      const importedQuestion = buildEditorQuestionFromServerQuestion({
+        ...surveyQuestion,
+        title: String(surveyQuestion.title || question.stem || question.title || ''),
+        description: String(surveyQuestion.description || question.analysis || '')
+      })
+
+      if ((!Array.isArray(importedQuestion.options) || importedQuestion.options.length === 0) && Array.isArray(question.options)) {
+        importedQuestion.options = question.options
+          .map(option => String(option?.label ?? option?.text ?? option?.value ?? '').trim())
+          .filter(Boolean)
+      }
+
+      if (!importedQuestion.examConfig && (question.score != null || question.correctAnswer !== undefined)) {
+        importedQuestion.examConfig = {
+          score: Number(question.score || 0),
+          correctAnswer: cloneJsonValue(question.correctAnswer)
+        }
+      }
+
+      importedQuestion.id = generateQuestionId()
+      importedQuestion.hideSystemNumber = areAllNumbersHidden.value
+      return importedQuestion
+    }
+
+    const type = mapServerTypeToLegacy(question.content?.questionType || question.type || 'input')
+    const importedQuestion = buildLegacyQuestion(type)
+    importedQuestion.title = String(question.stem || question.title || '').trim() || getQuestionTypeLabel(type)
+    if (question.analysis) importedQuestion.description = String(question.analysis)
+    if (Array.isArray(question.options)) {
+      importedQuestion.options = question.options
+        .map(option => String(option?.label ?? option?.text ?? option?.value ?? '').trim())
+        .filter(Boolean)
+    }
+    if (question.score != null || question.correctAnswer !== undefined) {
+      importedQuestion.examConfig = {
+        score: Number(question.score || 0),
+        correctAnswer: cloneJsonValue(question.correctAnswer)
+      }
+    }
+    return importedQuestion
+  }
+
+  function importQuestionBankQuestion(question: QuestionBankQuestionDTO) {
+    const importedQuestion = buildEditorQuestionFromQuestionBank(question)
+    surveyForm.questions.push(importedQuestion)
+    editingIndex.value = surveyForm.questions.length - 1
+    currentTab.value = 'edit'
+    return importedQuestion
   }
 
   function ensureSliderValidation(question: SurveyEditorQuestion) {
@@ -481,11 +662,59 @@ export function useEditorCore() {
     if (editingIndex.value === index) editingIndex.value = index + 1
   }
 
+  function buildAiImportedQuestion(question: {
+    legacyType: number
+    title: string
+    required: boolean
+    options?: string[]
+    placeholder?: string
+    description?: string
+    validation?: Record<string, unknown>
+  }): SurveyEditorQuestion {
+    const importedQuestion = buildLegacyQuestion(question.legacyType)
+    importedQuestion.title = question.title
+    importedQuestion.required = question.required
+    importedQuestion.hideSystemNumber = areAllNumbersHidden.value
+
+    if (question.description) importedQuestion.description = question.description
+    if (Array.isArray(question.options)) importedQuestion.options = [...question.options]
+    if (question.validation) {
+      importedQuestion.validation = {
+        ...(importedQuestion.validation || {}),
+        ...question.validation
+      }
+    }
+    if (question.placeholder) (importedQuestion as any).placeholder = question.placeholder
+
+    return importedQuestion
+  }
+
   function generateByAI() {
     if (!aiPrompt.value.trim()) {
-      alert('请输入生成需求')
+      alert('Please enter AI content or JSON first.')
       return
     }
+
+    const parsedAiSurvey = parseAiSurveyInput(aiPrompt.value)
+    if (parsedAiSurvey.success) {
+      if (!surveyForm.title.trim()) surveyForm.title = parsedAiSurvey.data.title
+      if (!surveyForm.description.trim() && parsedAiSurvey.data.description) {
+        surveyForm.description = parsedAiSurvey.data.description
+      }
+
+      const importedQuestions = parsedAiSurvey.data.questions.map(buildAiImportedQuestion)
+      surveyForm.questions.push(...importedQuestions)
+      showAIHelper.value = false
+      aiPrompt.value = ''
+      alert(`Imported ${importedQuestions.length} questions from validated AI JSON.`)
+      return
+    }
+
+    if (isLikelyAiJsonInput(aiPrompt.value)) {
+      alert(`AI JSON validation failed:\n${formatAiSurveyIssues(parsedAiSurvey.issues)}`)
+      return
+    }
+
     surveyForm.questions.push(
       {
         id: generateQuestionId(),
@@ -515,7 +744,6 @@ export function useEditorCore() {
     aiPrompt.value = ''
     alert('已生成示例题目，可继续编辑完善。')
   }
-
   function duplicateQuestion(index: number) {
     const originalQuestion = surveyForm.questions[index]
     const duplicatedQuestion = {
@@ -584,7 +812,8 @@ export function useEditorCore() {
   function toggleHidden(question: SurveyEditorQuestion, optionIndex: number) {
     const extra = ensureOptionExtras(question, optionIndex)
     if (!extra.hidden) {
-      const hasOptionLogic = Array.isArray(question?.optionLogic?.[optionIndex]) && question.optionLogic[optionIndex]?.length > 0
+      const optionLogic = question.optionLogic?.[optionIndex]
+      const hasOptionLogic = Array.isArray(optionLogic) && optionLogic.length > 0
       const hasJumpByOption = !!(question?.jumpLogic?.byOption && String(question.jumpLogic.byOption[String(optionIndex + 1)] || '') !== '')
       if (hasOptionLogic || hasJumpByOption) {
         alert('该选项已配置逻辑关系，不能直接隐藏。')
@@ -609,164 +838,241 @@ export function useEditorCore() {
     setHintOpen(question, !!target.checked)
   }
 
-  function toServerPayload() {
-    const idToOrder = Object.fromEntries(surveyForm.questions.map((question, index) => [String(question.id), String(index + 1)]))
-    const questions = surveyForm.questions.map((question, index) => {
-      const base: any = {
-        uiType: Number((question as any).uiType ?? question.type),
-        type: mapLegacyTypeToServer(question.type),
-        title: question.title,
-        ...(question.titleHtml ? { titleHtml: question.titleHtml } : {}),
-        description: question.description,
-        required: question.required,
-        order: index + 1,
-        hideSystemNumber: !!question.hideSystemNumber
+  function buildServerQuestionPayload(
+    question: SurveyEditorQuestion,
+    index: number,
+    options: {
+      includeCrossQuestionLogic?: boolean
+    } = {}
+  ) {
+    const includeCrossQuestionLogic = options.includeCrossQuestionLogic !== false
+    const idToOrder = Object.fromEntries(surveyForm.questions.map((item, questionIndex) => [String(item.id), String(questionIndex + 1)]))
+    const base: any = {
+      uiType: Number((question as any).uiType ?? question.type),
+      type: mapLegacyTypeToServer(question.type),
+      title: question.title,
+      ...(question.titleHtml ? { titleHtml: question.titleHtml } : {}),
+      description: question.description,
+      required: question.required,
+      order: index + 1,
+      hideSystemNumber: !!question.hideSystemNumber
+    }
+
+    if (question.examConfig && typeof question.examConfig === 'object') {
+      const examScore = Number(question.examConfig.score || 0)
+      if (Number.isFinite(examScore) || question.examConfig.correctAnswer !== undefined) {
+        base.examConfig = {
+          ...(Number.isFinite(examScore) ? { score: examScore } : {}),
+          ...(question.examConfig.correctAnswer !== undefined
+            ? { correctAnswer: cloneJsonValue(question.examConfig.correctAnswer) }
+            : {})
+        }
+      }
+    }
+
+    if (question.validation && typeof question.validation === 'object') {
+      base.validation = { ...question.validation }
+    }
+
+    const isOptionType = ['radio', 'checkbox', 'ranking', 'matrix', 'ratio'].includes(base.type)
+    if (isOptionType) {
+      base.options = (question.options || []).map((label, optionIndex) => {
+        const extra: any = (question as any).optionExtras?.[optionIndex] || {}
+        return {
+          label,
+          value: String(optionIndex + 1),
+          order: optionIndex + 1,
+          quotaLimit: Number(extra.quotaLimit || 0),
+          quotaEnabled: extra.quotaEnabled !== false,
+          rich: !!extra.rich,
+          desc: extra.hasDesc ? extra.desc || '' : '',
+          exclusive: !!extra.exclusive,
+          defaultSelected: !!extra.defaultSelected,
+          hidden: !!extra.hidden,
+          fillEnabled: !!extra.fillEnabled,
+          fillRequired: !!extra.fillRequired,
+          fillPlaceholder: extra.fillPlaceholder || ''
+        }
+      })
+      base.optionOrder = question.optionOrder || 'none'
+
+      if (Array.isArray((question as any).optionGroups) && (question as any).optionGroups.length > 0) {
+        base.optionGroups = (question as any).optionGroups
+          .map((group: any) => ({
+            name: String(group?.name ?? ''),
+            from: Number(group?.from ?? NaN),
+            to: Number(group?.to ?? NaN),
+            random: !!group?.random
+          }))
+          .filter((group: any) => Number.isFinite(group.from) && Number.isFinite(group.to) && group.from >= 1 && group.to >= group.from)
+      }
+      if ((question as any).groupOrderRandom != null) base.groupOrderRandom = !!(question as any).groupOrderRandom
+      if ((question as any).quotasEnabled != null) base.quotasEnabled = !!(question as any).quotasEnabled
+      if ((question as any).quotaMode) base.quotaMode = (question as any).quotaMode
+      if ((question as any).quotaFullText != null) base.quotaFullText = String((question as any).quotaFullText || '')
+      if ((question as any).quotaShowRemaining != null) base.quotaShowRemaining = !!(question as any).quotaShowRemaining
+      if ((question as any).autoSelectOnAppear) base.autoSelectOnAppear = true
+
+      if (includeCrossQuestionLogic && Array.isArray((question as any).optionLogic)) {
+        base.options = base.options.map((option: any, optionIndex: number) => {
+          const optionGroups = (question as any).optionLogic?.[optionIndex]
+          if (!Array.isArray(optionGroups) || optionGroups.length === 0) return option
+          const mappedGroups = optionGroups.map((group: any[]) =>
+            (group || []).map((condition: any) => {
+              const depLocalId = String(condition.qid)
+              const depIndex = surveyForm.questions.findIndex(item => String(item.id) === depLocalId || String(item.id) === String(condition.qid))
+              const depQuestion = surveyForm.questions[depIndex]
+              let value: any = condition.value
+              if (depQuestion && Array.isArray(depQuestion.options) && depQuestion.options.length > 0) {
+                const labelToValue = new Map<string, string>()
+                depQuestion.options.forEach((depLabel: string, depOptionIndex: number) => {
+                  labelToValue.set(String(depLabel), String(depOptionIndex + 1))
+                })
+                const mapValue = (raw: any) => {
+                  const stringValue = String(raw)
+                  if (/^\d+$/.test(stringValue)) return stringValue
+                  return labelToValue.get(stringValue) || stringValue
+                }
+                value = Array.isArray(condition.value) ? condition.value.map(mapValue) : mapValue(condition.value)
+              }
+              return {
+                qid: idToOrder[String(condition.qid)] || String(condition.qid),
+                op: condition.op,
+                value
+              }
+            })
+          )
+          return { ...option, visibleWhen: mappedGroups }
+        })
       }
 
-      if (question.validation && typeof question.validation === 'object') {
-        base.validation = { ...question.validation }
-      }
+      if (includeCrossQuestionLogic && (question as any).jumpLogic) base.jumpLogic = (question as any).jumpLogic
+    }
 
-      const isOptionType = ['radio', 'checkbox', 'ranking', 'matrix', 'ratio'].includes(base.type)
-      if (isOptionType) {
-        base.options = (question.options || []).map((label, optionIndex) => {
-          const extra: any = (question as any).optionExtras?.[optionIndex] || {}
+    if (base.type === 'matrix') {
+      const matrix = ensureMatrixConfig(question)
+      base.matrix = {
+        selectionType: matrix.selectionType,
+        rows: matrix.rows.map((label: string, rowIndex: number) => ({
+          label,
+          value: String(rowIndex + 1),
+          order: rowIndex + 1
+        }))
+      }
+    }
+
+    if (base.type === 'rating') {
+      const validation = ensureRatingValidation(question)
+      base.validation = {
+        ...base.validation,
+        min: validation.min,
+        max: validation.max,
+        step: 1
+      }
+    }
+
+    if (base.type === 'scale') {
+      const validation = ensureScaleValidation(question)
+      base.validation = {
+        ...base.validation,
+        min: validation.min,
+        max: validation.max,
+        step: validation.step,
+        minLabel: validation.minLabel || '',
+        maxLabel: validation.maxLabel || ''
+      }
+    }
+
+    if (includeCrossQuestionLogic && (question as any).logic?.visibleWhen) {
+      const mapped = (question as any).logic.visibleWhen.map((group: any[]) =>
+        (group || []).map((condition: any) => {
+          const depLocalId = String(condition.qid)
+          const depIndex = surveyForm.questions.findIndex(item => String(item.id) === depLocalId || String(item.id) === String(condition.qid))
+          const depQuestion = surveyForm.questions[depIndex]
+          let value: any = condition.value
+          if (depQuestion && Array.isArray(depQuestion.options) && depQuestion.options.length > 0) {
+            const labelToValue = new Map<string, string>()
+            depQuestion.options.forEach((label: string, depOptionIndex: number) => {
+              labelToValue.set(String(label), String(depOptionIndex + 1))
+            })
+            const mapValue = (raw: any) => {
+              const stringValue = String(raw)
+              if (/^\d+$/.test(stringValue)) return stringValue
+              return labelToValue.get(stringValue) || stringValue
+            }
+            value = Array.isArray(condition.value) ? condition.value.map(mapValue) : mapValue(condition.value)
+          }
           return {
-            label,
-            value: String(optionIndex + 1),
-            order: optionIndex + 1,
-            quotaLimit: Number(extra.quotaLimit || 0),
-            quotaEnabled: extra.quotaEnabled !== false,
-            rich: !!extra.rich,
-            desc: extra.hasDesc ? extra.desc || '' : '',
-            exclusive: !!extra.exclusive,
-            defaultSelected: !!extra.defaultSelected,
-            hidden: !!extra.hidden,
-            fillEnabled: !!extra.fillEnabled,
-            fillRequired: !!extra.fillRequired,
-            fillPlaceholder: extra.fillPlaceholder || ''
+            qid: idToOrder[String(condition.qid)] || String(condition.qid),
+            op: condition.op,
+            value
           }
         })
-        base.optionOrder = question.optionOrder || 'none'
+      )
+      base.logic = { visibleWhen: mapped }
+    }
 
-        if (Array.isArray((question as any).optionGroups) && (question as any).optionGroups.length > 0) {
-          base.optionGroups = (question as any).optionGroups
-            .map((group: any) => ({
-              name: String(group?.name ?? ''),
-              from: Number(group?.from ?? NaN),
-              to: Number(group?.to ?? NaN),
-              random: !!group?.random
-            }))
-            .filter((group: any) => Number.isFinite(group.from) && Number.isFinite(group.to) && group.from >= 1 && group.to >= group.from)
-        }
-        if ((question as any).groupOrderRandom != null) base.groupOrderRandom = !!(question as any).groupOrderRandom
-        if ((question as any).quotasEnabled != null) base.quotasEnabled = !!(question as any).quotasEnabled
-        if ((question as any).quotaMode) base.quotaMode = (question as any).quotaMode
-        if ((question as any).quotaFullText != null) base.quotaFullText = String((question as any).quotaFullText || '')
-        if ((question as any).quotaShowRemaining != null) base.quotaShowRemaining = !!(question as any).quotaShowRemaining
-        if ((question as any).autoSelectOnAppear) base.autoSelectOnAppear = true
+    return base
+  }
 
-        if (Array.isArray((question as any).optionLogic)) {
-          base.options = base.options.map((option: any, optionIndex: number) => {
-            const optionGroups = (question as any).optionLogic?.[optionIndex]
-            if (!Array.isArray(optionGroups) || optionGroups.length === 0) return option
-            const mappedGroups = optionGroups.map((group: any[]) =>
-              (group || []).map((condition: any) => {
-                const depLocalId = String(condition.qid)
-                const depIndex = surveyForm.questions.findIndex(item => String(item.id) === depLocalId || String(item.id) === String(condition.qid))
-                const depQuestion = surveyForm.questions[depIndex]
-                let value: any = condition.value
-                if (depQuestion && Array.isArray(depQuestion.options) && depQuestion.options.length > 0) {
-                  const labelToValue = new Map<string, string>()
-                  depQuestion.options.forEach((depLabel: string, depOptionIndex: number) => {
-                    labelToValue.set(String(depLabel), String(depOptionIndex + 1))
-                  })
-                  const mapValue = (raw: any) => {
-                    const stringValue = String(raw)
-                    if (/^\d+$/.test(stringValue)) return stringValue
-                    return labelToValue.get(stringValue) || stringValue
-                  }
-                  value = Array.isArray(condition.value) ? condition.value.map(mapValue) : mapValue(condition.value)
-                }
-                return {
-                  qid: idToOrder[String(condition.qid)] || String(condition.qid),
-                  op: condition.op,
-                  value
-                }
-              })
-            )
-            return { ...option, visibleWhen: mappedGroups }
-          })
-        }
+  function buildQuestionBankPayload(questionIndex: number, metadata: QuestionBankExportMetadata = {}): QuestionBankQuestionFormDTO | null {
+    const question = surveyForm.questions[questionIndex]
+    if (!question) return null
 
-        if ((question as any).jumpLogic) base.jumpLogic = (question as any).jumpLogic
+    const exportedQuestion = buildServerQuestionPayload(question, questionIndex, { includeCrossQuestionLogic: false })
+    const title = String(question.title || getQuestionTypeLabel(question.type)).trim() || getQuestionTypeLabel(question.type)
+    const description = String(question.description || '').trim()
+    const rawScore = question.examConfig && typeof question.examConfig === 'object'
+      ? Number(question.examConfig.score || 0)
+      : NaN
+    const hasScore = Number.isFinite(rawScore)
+    const normalizedTags = Array.isArray(metadata.tags) ? metadata.tags.map(item => String(item).trim()).filter(Boolean) : []
+    const normalizedKnowledgePoints = Array.isArray(metadata.knowledgePoints) ? metadata.knowledgePoints.map(item => String(item).trim()).filter(Boolean) : []
+    const normalizedApplicableScenes = Array.isArray(metadata.applicableScenes) ? metadata.applicableScenes.map(item => String(item).trim()).filter(Boolean) : []
+    const normalizedAiMeta = metadata.aiMeta && isPlainObject(metadata.aiMeta) ? cloneJsonValue(metadata.aiMeta) : undefined
+    const topLevelOptions = serverQuestionTypeHasOptions(exportedQuestion.type) && Array.isArray(exportedQuestion.options)
+      ? exportedQuestion.options.map((option: any) => ({
+          label: String(option?.label ?? ''),
+          value: option?.value == null ? undefined : String(option.value),
+          ...(option?.desc ? { desc: String(option.desc) } : {})
+        }))
+      : undefined
+
+    return {
+      title,
+      type: exportedQuestion.type,
+      ...(hasScore ? { score: rawScore } : {}),
+      ...(question.examConfig?.correctAnswer !== undefined
+        ? { correctAnswer: cloneJsonValue(question.examConfig.correctAnswer) }
+        : {}),
+      stem: title,
+      ...(description ? { analysis: description } : {}),
+      ...(normalizedTags.length > 0 ? { tags: normalizedTags } : {}),
+      ...(normalizedKnowledgePoints.length > 0 ? { knowledgePoints: normalizedKnowledgePoints } : {}),
+      ...(normalizedApplicableScenes.length > 0 ? { applicableScenes: normalizedApplicableScenes } : {}),
+      ...(normalizedAiMeta ? { aiMeta: normalizedAiMeta } : {}),
+      ...(topLevelOptions && topLevelOptions.length > 0 ? { options: topLevelOptions } : {}),
+      content: {
+        title,
+        questionType: exportedQuestion.type,
+        stem: title,
+        ...(description ? { analysis: description } : {}),
+        ...(normalizedTags.length > 0 ? { tags: normalizedTags } : {}),
+        ...(normalizedKnowledgePoints.length > 0 ? { knowledgePoints: normalizedKnowledgePoints } : {}),
+        ...(normalizedApplicableScenes.length > 0 ? { applicableScenes: normalizedApplicableScenes } : {}),
+        ...(hasScore ? { score: rawScore } : {}),
+        ...(question.examConfig?.correctAnswer !== undefined
+          ? { correctAnswer: cloneJsonValue(question.examConfig.correctAnswer) }
+          : {}),
+        ...(topLevelOptions && topLevelOptions.length > 0 ? { options: cloneJsonValue(topLevelOptions) } : {}),
+        ...(normalizedAiMeta ? { aiMeta: normalizedAiMeta } : {}),
+        surveyQuestion: exportedQuestion
       }
+    }
+  }
 
-      if (base.type === 'matrix') {
-        const matrix = ensureMatrixConfig(question)
-        base.matrix = {
-          selectionType: matrix.selectionType,
-          rows: matrix.rows.map((label: string, rowIndex: number) => ({
-            label,
-            value: String(rowIndex + 1),
-            order: rowIndex + 1
-          }))
-        }
-      }
-
-      if (base.type === 'rating') {
-        const validation = ensureRatingValidation(question)
-        base.validation = {
-          ...base.validation,
-          min: validation.min,
-          max: validation.max,
-          step: 1
-        }
-      }
-
-      if (base.type === 'scale') {
-        const validation = ensureScaleValidation(question)
-        base.validation = {
-          ...base.validation,
-          min: validation.min,
-          max: validation.max,
-          step: validation.step,
-          minLabel: validation.minLabel || '',
-          maxLabel: validation.maxLabel || ''
-        }
-      }
-
-      if ((question as any).logic?.visibleWhen) {
-        const mapped = (question as any).logic.visibleWhen.map((group: any[]) =>
-          (group || []).map((condition: any) => {
-            const depLocalId = String(condition.qid)
-            const depIndex = surveyForm.questions.findIndex(item => String(item.id) === depLocalId || String(item.id) === String(condition.qid))
-            const depQuestion = surveyForm.questions[depIndex]
-            let value: any = condition.value
-            if (depQuestion && Array.isArray(depQuestion.options) && depQuestion.options.length > 0) {
-              const labelToValue = new Map<string, string>()
-              depQuestion.options.forEach((label: string, depOptionIndex: number) => {
-                labelToValue.set(String(label), String(depOptionIndex + 1))
-              })
-              const mapValue = (raw: any) => {
-                const stringValue = String(raw)
-                if (/^\d+$/.test(stringValue)) return stringValue
-                return labelToValue.get(stringValue) || stringValue
-              }
-              value = Array.isArray(condition.value) ? condition.value.map(mapValue) : mapValue(condition.value)
-            }
-            return {
-              qid: idToOrder[String(condition.qid)] || String(condition.qid),
-              op: condition.op,
-              value
-            }
-          })
-        )
-        base.logic = { visibleWhen: mapped }
-      }
-
-      return base
-    })
+  function toServerPayload() {
+    const questions = surveyForm.questions.map((question, index) => buildServerQuestionPayload(question, index))
 
     return {
       title: surveyForm.title,
@@ -823,61 +1129,11 @@ export function useEditorCore() {
           })
         }
       } catch (error) {
-        console.warn('加载答卷统计失败，使用默认值', error)
+        console.warn('加载答卷统计失败，使用默认值。', error)
       }
 
       const sourceQuestions = Array.isArray(survey.questions) ? survey.questions : []
-      surveyForm.questions = sourceQuestions.map((question: any) => ({
-        id: question.id ? String(question.id) : generateQuestionId(),
-        type: mapServerTypeToLegacy(question.type || 'input', question.uiType),
-        title: question.title || '',
-        ...(question.titleHtml ? { titleHtml: question.titleHtml } : {}),
-        description: question.description || '',
-        required: !!question.required,
-        validation: question.validation || undefined,
-        matrix: question.matrix
-          ? {
-              rows: Array.isArray(question.matrix.rows) ? question.matrix.rows.map((row: any) => row.label ?? String(row)) : [],
-              selectionType: question.matrix.selectionType === 'multiple' ? 'multiple' : 'single'
-            }
-          : undefined,
-        hideSystemNumber: !!question.hideSystemNumber,
-        quotasEnabled: !!question.quotasEnabled,
-        quotaMode: (question as any).quotaMode || 'explicit',
-        quotaFullText: (question as any).quotaFullText || '名额已满',
-        quotaShowRemaining: !!(question as any).quotaShowRemaining,
-        options: Array.isArray(question.options) ? question.options.map((option: any) => option.label ?? String(option)) : undefined,
-        optionOrder: (question.optionOrder as any) || 'none',
-        optionGroups: Array.isArray(question.optionGroups)
-          ? question.optionGroups
-              .map((group: any) => ({
-                name: String(group?.name ?? ''),
-                from: Number(group?.from ?? NaN),
-                to: Number(group?.to ?? NaN),
-                random: !!group?.random
-              }))
-              .filter((group: any) => Number.isFinite(group.from) && Number.isFinite(group.to) && group.from >= 1 && group.to >= group.from)
-          : [],
-        groupOrderRandom: !!question.groupOrderRandom,
-        autoSelectOnAppear: !!question.autoSelectOnAppear,
-        jumpLogic: question.jumpLogic,
-        optionLogic: [],
-        optionExtras: Array.isArray(question.options)
-          ? question.options.map((option: any) => ({
-              quotaLimit: Number(option.quotaLimit || 0),
-              quotaEnabled: option.quotaEnabled !== false,
-              rich: !!option.rich,
-              hasDesc: !!option.desc,
-              desc: option.desc || '',
-              exclusive: !!option.exclusive,
-              defaultSelected: !!option.defaultSelected,
-              hidden: !!option.hidden,
-              fillEnabled: !!option.fillEnabled,
-              fillRequired: !!option.fillRequired,
-              fillPlaceholder: option.fillPlaceholder || ''
-            }))
-          : []
-      }))
+      surveyForm.questions = sourceQuestions.map((question: any) => buildEditorQuestionFromServerQuestion(question))
 
       const orderToLocalId: Record<string, string> = {}
       surveyForm.questions.forEach((question, index) => {
@@ -982,6 +1238,7 @@ export function useEditorCore() {
     isScaleLegacyQuestion,
     buildLegacyQuestion,
     createDefaultQuestion,
+    importQuestionBankQuestion,
     ensureSliderValidation,
     normalizeSliderValidation,
     ensureRatingValidation,
@@ -1024,6 +1281,7 @@ export function useEditorCore() {
     isHintOpen,
     toggleHint,
     onHintCheckboxChange,
+    buildQuestionBankPayload,
     toServerPayload
   }
 }

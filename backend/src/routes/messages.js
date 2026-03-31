@@ -1,7 +1,10 @@
 import { Router } from 'express'
 import { asyncRoute } from '../http/asyncRoute.js'
+import { throwManagementError } from '../http/managementErrors.js'
 import { authRequired } from '../middlewares/auth.js'
 import { listActorMessages, markActorMessageRead } from '../services/messageService.js'
+import { normalizeRequiredIntegerParam } from '../utils/routeParams.js'
+import { MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
 const router = Router()
 
@@ -13,7 +16,10 @@ router.get('/', asyncRoute(async (req, res) => {
 }))
 
 router.post('/:id/read', asyncRoute(async (req, res) => {
-  const message = await markActorMessageRead({ actor: req.user, messageId: req.params.id })
+  const messageId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  const message = await markActorMessageRead({ actor: req.user, messageId })
   res.json({ success: true, data: message })
 }))
 

@@ -43,6 +43,350 @@ test('POST /api/surveys creates a survey through the service flow', async () => 
   assert.equal(createdPayloads[0].questions[0].type, 'input')
 })
 
+test('POST /api/surveys strips non-writable settings and style fields before persistence', async () => {
+  let createdPayload = null
+
+  Survey.create = async payload => {
+    createdPayload = payload
+    return {
+      id: 18,
+      title: payload.title,
+      creator_id: payload.creator_id,
+      settings: payload.settings,
+      style: payload.style,
+      questions: payload.questions
+    }
+  }
+  AuditLog.create = async () => ({ id: 1 })
+
+  const { response, json } = await request('/surveys', {
+    method: 'POST',
+    body: {
+      title: 'Settings Whitelist Survey',
+      questions: [{ type: 'input', title: 'Question 1' }],
+      settings: {
+        submitOnce: true,
+        randomizeQuestions: true,
+        showProgress: false,
+        debug: true,
+        uiState: { activeTab: 'publish' }
+      },
+      style: {
+        theme: 'clean',
+        backgroundColor: '#ffffff',
+        headerImage: '/demo.png',
+        injectedCss: 'body{display:none}'
+      }
+    }
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.ok(createdPayload)
+  assert.deepEqual(createdPayload.settings, {
+    showProgress: false,
+    submitOnce: true,
+    randomizeQuestions: true
+  })
+  assert.deepEqual(createdPayload.style, {
+    theme: 'clean',
+    backgroundColor: '#ffffff',
+    headerImage: '/demo.png'
+  })
+})
+
+test('POST /api/surveys strips non-writable QuestionDTO fields before persistence', async () => {
+  let createdPayload = null
+
+  Survey.create = async payload => {
+    createdPayload = payload
+    return {
+      id: 16,
+      title: payload.title,
+      creator_id: payload.creator_id,
+      questions: payload.questions
+    }
+  }
+  AuditLog.create = async () => ({ id: 1 })
+
+  const { response, json } = await request('/surveys', {
+    method: 'POST',
+    body: {
+      title: 'Whitelist Survey',
+      questions: [
+        {
+          type: 'input',
+          title: 'Question 1'
+        },
+        {
+          type: 'radio',
+          title: 'Favorite option',
+          required: true,
+          runtimeOnly: 'drop-me',
+          options: [
+            {
+              label: 'A',
+              value: '1',
+              quotaUsed: 99,
+              __quotaFull: true,
+              visibleWhen: [[{
+                qid: '1',
+                op: 'eq',
+                value: 'demo',
+                transient: 'drop-me-too'
+              }]]
+            },
+            {
+              label: 'B',
+              value: '2'
+            }
+          ],
+          logic: {
+            visibleWhen: [[{
+              qid: '1',
+              op: 'eq',
+              value: 'demo',
+              debug: true
+            }]],
+            debug: true
+          },
+          jumpLogic: {
+            byOption: { '1': 'end' },
+            unconditional: 'end',
+            traceId: 'drop-me'
+          },
+          optionGroups: [{
+            name: 'Group A',
+            from: 1,
+            to: 1,
+            random: false,
+            debug: true
+          }],
+          id: 'should-not-be-writable'
+        }
+      ]
+    }
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.ok(createdPayload)
+  assert.equal(createdPayload.questions[1].id, undefined)
+  assert.equal(createdPayload.questions[1].runtimeOnly, undefined)
+  assert.equal(createdPayload.questions[1].logic.debug, undefined)
+  assert.equal(createdPayload.questions[1].logic.visibleWhen[0][0].debug, undefined)
+  assert.equal(createdPayload.questions[1].jumpLogic.traceId, undefined)
+  assert.equal(createdPayload.questions[1].optionGroups[0].debug, undefined)
+  assert.equal(createdPayload.questions[1].options[0].quotaUsed, undefined)
+  assert.equal(createdPayload.questions[1].options[0].__quotaFull, undefined)
+  assert.equal(createdPayload.questions[1].options[0].visibleWhen[0][0].transient, undefined)
+})
+
+test('POST /api/surveys rejects invalid survey structure before persistence', async () => {
+  let createCalled = false
+
+  Survey.create = async () => {
+    createCalled = true
+    return { id: 1000 }
+  }
+
+  const { response, json } = await request('/surveys', {
+    method: 'POST',
+    body: {
+      title: 'Invalid Create Survey',
+      questions: [{
+        type: 'radio',
+        title: 'Question 1',
+        options: [{ label: 'Only option', value: '1' }]
+      }]
+    }
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /at least 2 options/i)
+  assert.equal(createCalled, false)
+})
+
+test('POST /api/surveys/validate returns normalized payload for a valid draft', async () => {
+  const { response, json } = await request('/surveys/validate', {
+    method: 'POST',
+    body: {
+      title: 'Dry Run Survey',
+      description: 'preview only',
+      settings: {
+        showProgress: true,
+        submitOnce: true,
+        debug: true
+      },
+      style: {
+        theme: 'clean',
+        runtimeOnly: true
+      },
+      questions: [{
+        type: 'radio',
+        title: 'Favorite option',
+        runtimeOnly: 'drop-me',
+        options: [
+          { label: 'A', value: '1', quotaUsed: 99 },
+          { label: 'B', value: '2', __remaining: 1 }
+        ]
+      }]
+    }
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.equal(json.data.valid, true)
+  assert.equal(json.data.error, null)
+  assert.equal(json.data.normalized.questions[0].runtimeOnly, undefined)
+  assert.equal(json.data.normalized.questions[0].options[0].quotaUsed, undefined)
+  assert.equal(json.data.normalized.questions[0].options[1].__remaining, undefined)
+  assert.deepEqual(json.data.normalized.settings, {
+    showProgress: true,
+    submitOnce: true
+  })
+  assert.deepEqual(json.data.normalized.style, {
+    theme: 'clean'
+  })
+})
+
+test('POST /api/surveys/validate returns validation errors without creating a survey', async () => {
+  let createCalled = false
+  Survey.create = async () => {
+    createCalled = true
+    return { id: 999 }
+  }
+
+  const { response, json } = await request('/surveys/validate', {
+    method: 'POST',
+    body: {
+      title: 'Invalid Dry Run Survey',
+      questions: [
+        {
+          type: 'radio',
+          title: 'Question 1',
+          options: [{ label: 'A', value: '1' }, { label: 'B', value: '2' }]
+        },
+        {
+          type: 'input',
+          title: 'Question 2',
+          logic: {
+            visibleWhen: [[{ qid: 2, op: 'eq', value: '1' }]]
+          }
+        }
+      ]
+    }
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.equal(json.data.valid, false)
+  assert.match(json.data.error, /logic\.visibleWhen/i)
+  assert.equal(createCalled, false)
+  assert.equal(json.data.normalized.questions.length, 2)
+})
+
+test('POST /api/surveys/validate rejects invalid endTime format', async () => {
+  const { response, json } = await request('/surveys/validate', {
+    method: 'POST',
+    body: {
+      title: 'Invalid End Time Survey',
+      settings: {
+        endTime: 'not-a-date'
+      },
+      questions: [{ type: 'input', title: 'Question 1' }]
+    }
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.equal(json.data.valid, false)
+  assert.equal(json.data.error, 'End time is invalid')
+})
+
+test('POST /api/surveys/dry-run validates survey JSON strings without creating a survey', async () => {
+  let createCalled = false
+  Survey.create = async () => {
+    createCalled = true
+    return { id: 1000 }
+  }
+
+  const { response, json } = await request('/surveys/dry-run', {
+    method: 'POST',
+    body: {
+      json: JSON.stringify({
+        title: 'JSON Dry Run Survey',
+        description: 'from ai',
+        settings: {
+          submitOnce: true,
+          debug: true
+        },
+        questions: [{
+          type: 'radio',
+          title: 'Favorite option',
+          runtimeOnly: 'drop-me',
+          options: [
+            { label: 'A', value: '1', quotaUsed: 10 },
+            { label: 'B', value: '2' }
+          ]
+        }]
+      })
+    }
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.equal(json.data.valid, true)
+  assert.equal(json.data.error, null)
+  assert.equal(json.data.normalized.questions[0].runtimeOnly, undefined)
+  assert.equal(json.data.normalized.questions[0].options[0].quotaUsed, undefined)
+  assert.deepEqual(json.data.normalized.settings, {
+    submitOnce: true
+  })
+  assert.equal(createCalled, false)
+})
+
+test('POST /api/surveys/dry-run rejects invalid survey JSON strings', async () => {
+  const { response, json } = await request('/surveys/dry-run', {
+    method: 'POST',
+    body: {
+      json: '{"title":"broken"'
+    }
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /survey json is invalid/i)
+})
+
+test('POST /api/surveys rejects invalid endTime format before persistence', async () => {
+  let createCalled = false
+  Survey.create = async () => {
+    createCalled = true
+    return { id: 1001 }
+  }
+
+  const { response, json } = await request('/surveys', {
+    method: 'POST',
+    body: {
+      title: 'Invalid End Time Create',
+      settings: {
+        endTime: 'not-a-date'
+      },
+      questions: [{ type: 'input', title: 'Question 1' }]
+    }
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /end time is invalid/i)
+  assert.equal(createCalled, false)
+})
+
 test('PUT /api/surveys/:id updates a survey through the service flow', async () => {
   let updatedPayload = null
 
@@ -65,6 +409,222 @@ test('PUT /api/surveys/:id updates a survey through the service flow', async () 
   assert.equal(json.data.title, 'After Update')
   assert.equal(updatedPayload.title, 'After Update')
   assert.equal(updatedPayload.questions[0].type, 'rating')
+})
+
+test('PUT /api/surveys/:id rejects invalid survey structure before persistence', async () => {
+  let updateCalled = false
+
+  Survey.findByIdentifier = async () => ({
+    id: 24,
+    creator_id: 1,
+    title: 'Before Update',
+    questions: [{ type: 'input', title: 'Question 1' }],
+    settings: {},
+    style: {}
+  })
+  Survey.update = async () => {
+    updateCalled = true
+    return { id: 24 }
+  }
+
+  const { response, json } = await request('/surveys/24', {
+    method: 'PUT',
+    body: {
+      questions: [{
+        type: 'radio',
+        title: 'Question 1',
+        options: [{ label: 'Only option', value: '1' }]
+      }]
+    }
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /at least 2 options/i)
+  assert.equal(updateCalled, false)
+})
+
+test('PUT /api/surveys/:id keeps writable QuestionDTO fields while dropping extras', async () => {
+  let updatedPayload = null
+
+  Survey.findByIdentifier = async () => ({ id: 17, creator_id: 1, title: 'Before Update' })
+  Survey.update = async (_id, payload) => {
+    updatedPayload = payload
+    return { id: 17, ...payload }
+  }
+
+  const { response, json } = await request('/surveys/17', {
+    method: 'PUT',
+    body: {
+      questions: [{
+        type: 'matrix',
+        title: 'Matrix Question',
+        options: [
+          { label: 'Column 1', value: '1' },
+          { label: 'Column 2', value: '2' }
+        ],
+        matrix: {
+          selectionType: 'single',
+          rows: [{
+            label: 'Row 1',
+            value: 'r1',
+            helper: 'drop-me'
+          }]
+        },
+        validation: {
+          min: 1,
+          max: 5,
+          unknownFlag: 'drop-me'
+        },
+        examConfig: {
+          score: 10,
+          correctAnswer: '1',
+          secret: 'drop-me'
+        }
+      }]
+    }
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.ok(updatedPayload)
+  assert.equal(updatedPayload.questions[0].matrix.rows[0].helper, undefined)
+  assert.equal(updatedPayload.questions[0].validation.unknownFlag, undefined)
+  assert.equal(updatedPayload.questions[0].examConfig.secret, undefined)
+  assert.equal(updatedPayload.questions[0].examConfig.score, 10)
+  assert.equal(updatedPayload.questions[0].examConfig.correctAnswer, '1')
+})
+
+test('PUT /api/surveys/:id strips non-writable settings and style fields before persistence', async () => {
+  let updatedPayload = null
+
+  Survey.findByIdentifier = async () => ({
+    id: 19,
+    creator_id: 1,
+    title: 'Before Update',
+    questions: [{ type: 'input', title: 'Question 1' }],
+    settings: {},
+    style: {}
+  })
+  Survey.update = async (_id, payload) => {
+    updatedPayload = payload
+    return { id: 19, ...payload }
+  }
+
+  const { response, json } = await request('/surveys/19', {
+    method: 'PUT',
+    body: {
+      settings: {
+        allowMultipleSubmissions: true,
+        collectIP: true,
+        syncToken: 'drop-me'
+      },
+      style: {
+        theme: 'bold',
+        runtimePreview: true
+      }
+    }
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(json.success, true)
+  assert.ok(updatedPayload)
+  assert.deepEqual(updatedPayload.settings, {
+    allowMultipleSubmissions: true,
+    collectIP: true
+  })
+  assert.deepEqual(updatedPayload.style, {
+    theme: 'bold'
+  })
+})
+
+test('POST /api/surveys/:id/publish rejects invalid visibleWhen logic', async () => {
+  Survey.findByIdentifier = async () => ({
+    id: 20,
+    creator_id: 1,
+    title: 'Invalid Logic Survey',
+    questions: [
+      {
+        type: 'radio',
+        title: 'Question 1',
+        options: [{ label: 'A', value: '1' }, { label: 'B', value: '2' }]
+      },
+      {
+        type: 'input',
+        title: 'Question 2',
+        logic: {
+          visibleWhen: [[{ qid: 2, op: 'eq', value: '1' }]]
+        }
+      }
+    ]
+  })
+
+  const { response, json } = await request('/surveys/20/publish', { method: 'POST' })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /logic\.visibleWhen/i)
+})
+
+test('POST /api/surveys/:id/publish rejects invalid jumpLogic targets', async () => {
+  Survey.findByIdentifier = async () => ({
+    id: 21,
+    creator_id: 1,
+    title: 'Invalid Jump Survey',
+    questions: [
+      {
+        type: 'radio',
+        title: 'Question 1',
+        options: [{ label: 'A', value: '1' }, { label: 'B', value: '2' }],
+        jumpLogic: {
+          byOption: { '1': '1' }
+        }
+      },
+      {
+        type: 'input',
+        title: 'Question 2'
+      }
+    ]
+  })
+
+  const { response, json } = await request('/surveys/21/publish', { method: 'POST' })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /jumpLogic/i)
+})
+
+test('POST /api/surveys/:id/publish rejects overlapping optionGroups', async () => {
+  Survey.findByIdentifier = async () => ({
+    id: 22,
+    creator_id: 1,
+    title: 'Invalid Group Survey',
+    questions: [
+      {
+        type: 'radio',
+        title: 'Question 1',
+        options: [
+          { label: 'A', value: '1' },
+          { label: 'B', value: '2' },
+          { label: 'C', value: '3' }
+        ],
+        optionGroups: [
+          { name: 'Group A', from: 1, to: 2, random: false },
+          { name: 'Group B', from: 2, to: 3, random: false }
+        ]
+      }
+    ]
+  })
+
+  const { response, json } = await request('/surveys/22/publish', { method: 'POST' })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /optionGroups/i)
 })
 
 test('POST /api/surveys/:id/close closes a survey through the service flow', async () => {
@@ -238,5 +798,17 @@ test('DELETE /api/answers/batch removes answer attachments from db and disk and 
   } finally {
     if (fs.existsSync(answerFixturePath)) fs.unlinkSync(answerFixturePath)
   }
+})
+
+test('DELETE /api/answers/batch rejects invalid ids payload structures', async () => {
+  const { response, json } = await request('/answers/batch', {
+    method: 'DELETE',
+    body: { ids: [501, { id: 502 }] }
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /ids\[1\] must be an integer/i)
 })
 

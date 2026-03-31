@@ -5,6 +5,7 @@ import config from '../src/config/index.js'
 import Role from '../src/models/Role.js'
 import User from '../src/models/User.js'
 import { registerApiRouteHarness } from './helpers/apiRouteHarness.js'
+import { AUTH_ERROR_CODES } from '../../shared/auth.contract.js'
 
 const { requestPublic } = registerApiRouteHarness()
 
@@ -46,6 +47,30 @@ test('POST /api/auth/register creates a user through the auth service flow', asy
   })
 })
 
+test('POST /api/auth/register validates required fields through the auth contract error code', async () => {
+  const { response, json } = await requestPublic('/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: '', password: '' })
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, AUTH_ERROR_CODES.MISSING_FIELDS)
+})
+
+test('POST /api/auth/register rejects invalid payload structure', async () => {
+  const { response, json } = await requestPublic('/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: { text: 'alice' }, password: 'secret' })
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, AUTH_ERROR_CODES.INVALID_PAYLOAD)
+})
+
 test('POST /api/auth/login updates last-login and returns a signed token through the auth service flow', async () => {
   let updatedUserId = null
 
@@ -79,6 +104,18 @@ test('POST /api/auth/login updates last-login and returns a signed token through
   assert.equal(payload.roleCode, 'manager')
 })
 
+test('POST /api/auth/login rejects non-object payloads', async () => {
+  const { response, json } = await requestPublic('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(['alice', 'secret'])
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, AUTH_ERROR_CODES.INVALID_PAYLOAD)
+})
+
 test('GET /api/auth/me loads the current user session through the auth service flow', async () => {
   User.findById = async id => ({
     id,
@@ -99,4 +136,16 @@ test('GET /api/auth/me loads the current user session through the auth service f
   assert.equal(json.data.user.id, 18)
   assert.equal(json.data.user.password, undefined)
   assert.equal(json.data.role.code, 'editor')
+})
+
+test('GET /api/auth/me returns auth contract user-not-found code when token user is missing', async () => {
+  User.findById = async () => null
+
+  const { response, json } = await requestPublic('/auth/me', {
+    headers: { Authorization: `Bearer ${createToken({ sub: 404 })}` }
+  })
+
+  assert.equal(response.status, 401)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, AUTH_ERROR_CODES.USER_NOT_FOUND)
 })

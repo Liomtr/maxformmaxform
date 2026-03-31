@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto'
 import Answer from '../models/Answer.js'
-import FileModel from '../models/File.js'
+import fileRepository from '../repositories/fileRepository.js'
 import surveyAggregateRepository from '../repositories/surveyAggregateRepository.js'
 import {
   normalizeSurveyQuestions,
@@ -10,13 +10,19 @@ import {
 } from '../utils/questionSchema.js'
 import { buildUploadedFileUrl, removeUploadedFile } from '../utils/uploadStorage.js'
 import config from '../config/index.js'
+import { throwSurveyUploadPolicyError } from '../http/surveyUploadErrors.js'
+import {
+  getDuplicateSubmissionPolicy,
+  getSubmissionValidationPolicy,
+  getUploadEnabledPolicy,
+  getUploadFileRequiredPolicy,
+  getUploadQuestionExistsPolicy,
+  getUploadSessionRequiredPolicy,
+  getUploadValidationPolicy
+} from '../policies/surveyUploadPolicy.js'
 import { createSystemMessage } from './activity.js'
-import { getSurveyForPublicView, getSurveyForSubmission } from './surveyQueryService.js'
-import { createSurveySubmissionDto, createSurveyUploadDto, SURVEY_ERROR_CODES } from '../../../shared/survey.contract.js'
-
-function createHttpError(status, code, message) {
-  return Object.assign(new Error(message), { status, code })
-}
+import { getSurveyForPublicView, getSurveyForSubmission } from './surveyAccessService.js'
+import { createSurveySubmissionDto, createSurveyUploadDto } from '../../../shared/surveyUpload.contract.js'
 
 function normalizeUploadAnswerRefs(value) {
   const list = Array.isArray(value)
@@ -41,19 +47,19 @@ function normalizeUploadAnswerRefs(value) {
 async function cleanupPendingUploadRecords(files = []) {
   if (!Array.isArray(files) || files.length === 0) return
   files.forEach(file => removeUploadedFile(file?.url || file))
-  await FileModel.deleteByIds(files.map(file => Number(file.id)).filter(id => Number.isFinite(id) && id > 0))
+  await fileRepository.deleteByIds(files.map(file => Number(file.id)).filter(id => Number.isFinite(id) && id > 0))
 }
 
 async function cleanupExpiredPendingUploads() {
   const ttlHours = Math.max(1, Number(config.upload.pendingTtlHours || 24))
   const cutoff = new Date(Date.now() - ttlHours * 60 * 60 * 1000)
-  const expired = await FileModel.listExpiredPending(cutoff)
+  const expired = await fileRepository.listExpiredPending(cutoff)
   await cleanupPendingUploadRecords(expired)
 }
 
 async function cleanupPendingUploadsForSubmission(surveyId, submissionToken) {
   if (!submissionToken) return
-  const pending = await FileModel.listPendingBySubmission(surveyId, submissionToken)
+  const pending = await fileRepository.listPendingBySubmission(surveyId, submissionToken)
   await cleanupPendingUploadRecords(pending)
 }
 
@@ -74,7 +80,7 @@ async function resolveUploadAnswers(survey, normalizedAnswers, submissionToken) 
     return { normalizedAnswers: [], error: 'Upload answers must include a valid file id and upload token' }
   }
 
-  const files = await FileModel.findByIds(allRefs.map(ref => ref.id), { survey_id: survey.id })
+  const files = await fileRepository.findByIds(allRefs.map(ref => ref.id), { survey_id: survey.id })
   const byId = new Map(files.map(file => [Number(file.id), file]))
 
   const nextAnswers = normalizedAnswers.map(answer => {
@@ -141,39 +147,31 @@ export async function uploadSurveyFile({ survey, file, requestedQuestionId, subm
 
   await cleanupExpiredPendingUploads()
 
-  if (requestedQuestionId != null && requestedQuestionId !== '' && !uploadQuestion) {
-    throw createHttpError(400, SURVEY_ERROR_CODES.UPLOAD_QUESTION_NOT_FOUND, 'The target upload question does not exist')
-  }
-
-  if (uploadQuestion && !normalizedSubmissionToken) {
-    throw createHttpError(400, SURVEY_ERROR_CODES.UPLOAD_SESSION_REQUIRED, 'Upload requests must include a submission token')
-  }
-
-  if (!uploadQuestion && !surveySupportsPublicUpload(survey)) {
-    throw createHttpError(400, SURVEY_ERROR_CODES.UPLOAD_NOT_ENABLED, 'This survey does not accept file uploads')
-  }
-
-  if (!file) {
-    throw createHttpError(400, SURVEY_ERROR_CODES.NO_FILE, 'File is required')
-  }
+  throwSurveyUploadPolicyError(getUploadQuestionExistsPolicy(requestedQuestionId, uploadQuestion))
+  throwSurveyUploadPolicyError(getUploadSessionRequiredPolicy(uploadQuestion, normalizedSubmissionToken))
+  throwSurveyUploadPolicyError(getUploadEnabledPolicy(uploadQuestion, surveySupportsPublicUpload(survey)))
+  throwSurveyUploadPolicyError(getUploadFileRequiredPolicy(file))
 
   if (uploadQuestion) {
     const numericQuestionId = Number(requestedQuestionId)
-    const currentCount = await FileModel.countPendingBySurveyQuestionSession(survey.id, numericQuestionId, normalizedSubmissionToken)
+    const currentCount = await fileRepository.countPendingBySurveyQuestionSession(survey.id, numericQuestionId, normalizedSubmissionToken)
     const uploadConfig = normalizeUploadQuestionConfig(uploadQuestion)
     const uploadError = validateUploadFilesAgainstQuestion(uploadQuestion, [file], { enforceCount: false })
     const exceedsCount = currentCount + 1 > uploadConfig.maxFiles
 
-    if (uploadError || exceedsCount) {
+    const validationPolicy = getUploadValidationPolicy({
+      questionId: numericQuestionId,
+      uploadError,
+      exceedsCount,
+      maxFiles: uploadConfig.maxFiles
+    })
+    if (!validationPolicy.allowed) {
       removeUploadedFile(file)
-      const message = exceedsCount
-        ? `Question ${numericQuestionId} allows at most ${uploadConfig.maxFiles} files`
-        : `Question ${numericQuestionId} ${uploadError}`
-      throw createHttpError(400, SURVEY_ERROR_CODES.UPLOAD_VALIDATION, message)
+      throwSurveyUploadPolicyError(validationPolicy)
     }
   }
 
-  const saved = await FileModel.create({
+  const saved = await fileRepository.create({
     name: file.originalname || file.filename,
     url: buildUploadedFileUrl(file),
     size: file.size,
@@ -209,14 +207,10 @@ export async function uploadSurveyFileForRequest({
 export async function submitSurveyResponse({ survey, answers, clientSubmissionToken, submissionToken, duration, userAgent, forwardedFor, remoteAddress }) {
   const normalizedSubmissionToken = String(clientSubmissionToken ?? submissionToken ?? '').trim()
   const { normalizedAnswers, error } = validateSubmissionAnswers(survey.questions, answers)
-  if (error) {
-    throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, error)
-  }
+  throwSurveyUploadPolicyError(getSubmissionValidationPolicy(error))
 
   const uploadResolved = await resolveUploadAnswers(survey, normalizedAnswers, normalizedSubmissionToken)
-  if (uploadResolved.error) {
-    throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, uploadResolved.error)
-  }
+  throwSurveyUploadPolicyError(getSubmissionValidationPolicy(uploadResolved.error))
 
   const clientIp = String(forwardedFor || remoteAddress || '').split(',')[0].trim()
   const allowMultipleSubmissions = survey?.settings?.allowMultipleSubmissions === true
@@ -225,9 +219,7 @@ export async function submitSurveyResponse({ survey, answers, clientSubmissionTo
 
   if (shouldBlockRepeat) {
     const duplicateCount = await Answer.countByIp(survey.id, clientIp)
-    if (duplicateCount > 0) {
-      throw createHttpError(409, SURVEY_ERROR_CODES.DUPLICATE_SUBMISSION, 'Repeated submissions are not allowed')
-    }
+    throwSurveyUploadPolicyError(getDuplicateSubmissionPolicy(duplicateCount))
   }
 
   const uploadedFileIds = uploadResolved.normalizedAnswers

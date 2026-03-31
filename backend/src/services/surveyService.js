@@ -1,4 +1,5 @@
 export * from './surveyQueryService.js'
+export * from './surveyAccessService.js'
 export * from './surveyCommandService.js'
 export * from './surveyUploadService.js'
 export * from './surveyResultsService.js'

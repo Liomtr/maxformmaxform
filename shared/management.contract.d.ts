@@ -129,6 +129,31 @@ export interface QuestionBankRepoFormDTO {
   description?: string
 }
 
+export interface QuestionBankQuestionOptionDTO {
+  label: string
+  value?: string
+  text?: string
+  desc?: string
+  [key: string]: unknown
+}
+
+export interface QuestionBankQuestionContentDTO {
+  title?: string
+  questionType?: string
+  stem?: string
+  options?: QuestionBankQuestionOptionDTO[]
+  correctAnswer?: unknown
+  analysis?: string
+  tags?: string[]
+  knowledgePoints?: string[]
+  applicableScenes?: string[]
+  difficulty?: string
+  score?: number
+  surveyQuestion?: Record<string, unknown>
+  aiMeta?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 export interface QuestionBankQuestionDTO {
   id?: number
   repo_id?: number
@@ -137,6 +162,15 @@ export interface QuestionBankQuestionDTO {
   type?: string
   difficulty?: string
   score?: number
+  stem?: string
+  options?: QuestionBankQuestionOptionDTO[]
+  correctAnswer?: unknown
+  analysis?: string
+  tags?: string[]
+  knowledgePoints?: string[]
+  applicableScenes?: string[]
+  aiMeta?: Record<string, unknown>
+  content?: QuestionBankQuestionContentDTO
   created_at?: string
   updated_at?: string
   createdAt?: string
@@ -148,6 +182,15 @@ export interface QuestionBankQuestionFormDTO {
   type?: string
   difficulty?: string
   score?: number
+  stem?: string
+  options?: Array<QuestionBankQuestionOptionDTO | string>
+  correctAnswer?: unknown
+  analysis?: string
+  tags?: string[] | string
+  knowledgePoints?: string[] | string
+  applicableScenes?: string[] | string
+  aiMeta?: Record<string, unknown>
+  content?: QuestionBankQuestionContentDTO
 }
 
 export interface FolderDTO {
@@ -236,15 +279,43 @@ export interface AuditListQueryDTO extends PaginationQueryDTO {
   targetType?: string | null
 }
 
+export interface ManagementAiExecutionDTO {
+  id: number
+  actor_id?: number
+  actorId?: number
+  idempotencyKey: string
+  action: string
+  requestHash: string
+  status: string
+  requestPayload?: Record<string, unknown> | null
+  responsePayload?: Record<string, unknown> | null
+  errorCode?: string | null
+  errorMessage?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface ManagementAiExecutionListQueryDTO extends PaginationQueryDTO {
+  action?: string | null
+  status?: string | null
+  actor_id?: number | string | null
+  created_from?: string | null
+  created_to?: string | null
+}
+
 export type UserPageDTO = PaginatedResultDTO<UserDTO>
 export type MessagePageDTO = PaginatedResultDTO<MessageDTO>
 export type FilePageDTO = PaginatedResultDTO<FileDTO>
 export type AuditPageDTO = PaginatedResultDTO<AuditLogDTO>
+export type ManagementAiExecutionPageDTO = PaginatedResultDTO<ManagementAiExecutionDTO>
 
 export const MANAGEMENT_ERROR_PREFIX: 'MGMT'
 
 export const MANAGEMENT_ERROR_FAMILIES: Readonly<{
   ACCESS: 'MGMT_ACCESS'
+  AI: 'MGMT_AI'
   USER: 'MGMT_USER'
   ROLE: 'MGMT_ROLE'
   DEPT: 'MGMT_DEPT'
@@ -259,6 +330,9 @@ export const MANAGEMENT_ERROR_FAMILIES: Readonly<{
 
 export const MANAGEMENT_ERROR_CODES: Readonly<{
   ACCESS_FORBIDDEN: 'MGMT_ACCESS_FORBIDDEN'
+  INVALID_PAYLOAD: 'MGMT_INVALID_PAYLOAD'
+  AI_IDEMPOTENCY_REQUIRED: 'MGMT_AI_IDEMPOTENCY_REQUIRED'
+  AI_IDEMPOTENCY_CONFLICT: 'MGMT_AI_IDEMPOTENCY_CONFLICT'
   USER_NOT_FOUND: 'MGMT_USER_NOT_FOUND'
   USER_REQUIRED_FIELDS: 'MGMT_USER_REQUIRED_FIELDS'
   USER_EXISTS: 'MGMT_USER_EXISTS'
@@ -288,6 +362,7 @@ export const MANAGEMENT_ERROR_CODES: Readonly<{
   QUESTION_BANK_REPO_NAME_REQUIRED: 'MGMT_QUESTION_BANK_REPO_NAME_REQUIRED'
   QUESTION_BANK_REPO_NOT_FOUND: 'MGMT_QUESTION_BANK_REPO_NOT_FOUND'
   QUESTION_BANK_QUESTION_TITLE_REQUIRED: 'MGMT_QUESTION_BANK_QUESTION_TITLE_REQUIRED'
+  QUESTION_BANK_QUESTION_CONTENT_INVALID: 'MGMT_QUESTION_BANK_QUESTION_CONTENT_INVALID'
   QUESTION_BANK_QUESTION_SCORE_INVALID: 'MGMT_QUESTION_BANK_QUESTION_SCORE_INVALID'
   QUESTION_BANK_QUESTION_NOT_FOUND: 'MGMT_QUESTION_BANK_QUESTION_NOT_FOUND'
 }>
@@ -301,6 +376,7 @@ export const MANAGEMENT_PAGINATION_DEFAULTS: Readonly<{
   auditsPageSize: 20
   messagesPageSize: 50
   filesPageSize: 20
+  managementAiExecutionsPageSize: 20
 }>
 
 export function normalizeUserListQuery(query?: UserListQueryDTO): {
@@ -375,3 +451,69 @@ export function createAuditPageResult<T extends Partial<AuditLogDTO>>(input?: {
   page?: number | string | null
   pageSize?: number | string | null
 }): AuditPageDTO
+export function normalizeManagementAiExecutionListQuery(query?: ManagementAiExecutionListQueryDTO): {
+  page: number
+  pageSize: number
+  action?: string
+  status?: string
+  actor_id?: number
+  created_from?: string
+  created_to?: string
+}
+export function createManagementAiExecutionDto(execution?: Partial<ManagementAiExecutionDTO> | null): ManagementAiExecutionDTO | null
+export function createManagementAiExecutionPageResult<T extends Partial<ManagementAiExecutionDTO>>(input?: {
+  list?: T[] | readonly T[] | null
+  total?: number | string | null
+  page?: number | string | null
+  pageSize?: number | string | null
+}): ManagementAiExecutionPageDTO
+
+export interface ManagementActionEnvelopeDTO {
+  kind?: 'management.action'
+  version?: string
+  action: string
+  dryRun?: boolean
+  idempotencyKey?: string
+  target?: Record<string, unknown>
+  input?: Record<string, unknown>
+  changes?: Record<string, unknown>
+  reason?: string
+  meta?: Record<string, unknown>
+}
+
+export interface ManagementActionDefinitionDTO {
+  action: string
+  label: string
+  payloadField?: 'input' | 'changes' | null
+  targetKeys: string[]
+  summaryTemplate?: string
+  example: ManagementActionEnvelopeDTO
+}
+
+export interface ManagementActionProtocolDTO {
+  kind: 'management.action.protocol'
+  version: string
+  adminOnly: boolean
+  boundaries: {
+    auth: 'admin-active-session'
+    audit: 'service-audit-plus-ai-execution-ledger'
+    idempotency: 'required-on-execute'
+    rollback: 'single-action-single-service-transaction'
+  }
+  notes: string[]
+  envelope: ManagementActionEnvelopeDTO
+  actions: ManagementActionDefinitionDTO[]
+}
+
+export const MANAGEMENT_ACTION_PROTOCOL_VERSION: '2026-03-31'
+export const MANAGEMENT_ACTION_KIND: 'management.action'
+export const MANAGEMENT_ACTION_PROTOCOL_KIND: 'management.action.protocol'
+export const MANAGEMENT_ACTION_BOUNDARIES: Readonly<{
+  auth: 'admin-active-session'
+  audit: 'service-audit-plus-ai-execution-ledger'
+  idempotency: 'required-on-execute'
+  rollback: 'single-action-single-service-transaction'
+}>
+
+export function listManagementActionDefinitions(): ManagementActionDefinitionDTO[]
+export function createManagementActionProtocol(): ManagementActionProtocolDTO

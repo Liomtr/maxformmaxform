@@ -40,8 +40,8 @@ test('DELETE /api/depts/:id clears member dept assignments before deleting', asy
   assert.equal(response.status, 200)
   assert.equal(json.success, true)
   assert.equal(json.data.clearedUsers, 3)
-  assert.equal(cleared, '8')
-  assert.equal(deleted, '8')
+  assert.equal(cleared, 8)
+  assert.equal(deleted, 8)
 })
 
 test('POST /api/users/import reports created and skipped rows correctly', async () => {
@@ -79,6 +79,15 @@ test('POST /api/users/import reports created and skipped rows correctly', async 
     json.data.errors.map(item => item.reason),
     ['username is required', 'duplicate username in import payload', 'user already exists']
   )
+})
+
+test('GET /api/users rejects invalid dept_id query structure', async () => {
+  const { response, json } = await request('/users?dept_id=abc')
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'MGMT_INVALID_PAYLOAD')
+  assert.match(json.error.message, /dept_id must be an integer/i)
 })
 
 test('GET /api/positions returns stored positions', async () => {

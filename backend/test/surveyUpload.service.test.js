@@ -1,32 +1,33 @@
 import test, { afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import Answer from '../src/models/Answer.js'
-import FileModel from '../src/models/File.js'
+import fileRepository from '../src/repositories/fileRepository.js'
 import surveyAggregateRepository from '../src/repositories/surveyAggregateRepository.js'
 import { submitSurveyResponse, uploadSurveyFile } from '../src/services/surveyUploadService.js'
+import { SURVEY_UPLOAD_ERROR_CODES } from '../../shared/surveyUpload.contract.js'
 
 const originalAnswerCountByIp = Answer.countByIp
-const originalFileCreate = FileModel.create
-const originalFileDeleteByIds = FileModel.deleteByIds
-const originalFileFindByIds = FileModel.findByIds
-const originalFileCountPendingBySurveyQuestionSession = FileModel.countPendingBySurveyQuestionSession
-const originalFileListExpiredPending = FileModel.listExpiredPending
-const originalFileListPendingBySubmission = FileModel.listPendingBySubmission
+const originalFileCreate = fileRepository.create
+const originalFileDeleteByIds = fileRepository.deleteByIds
+const originalFileFindByIds = fileRepository.findByIds
+const originalFileCountPendingBySurveyQuestionSession = fileRepository.countPendingBySurveyQuestionSession
+const originalFileListExpiredPending = fileRepository.listExpiredPending
+const originalFileListPendingBySubmission = fileRepository.listPendingBySubmission
 const originalCreateSubmission = surveyAggregateRepository.createSubmission
 
 afterEach(() => {
   Answer.countByIp = originalAnswerCountByIp
-  FileModel.create = originalFileCreate
-  FileModel.deleteByIds = originalFileDeleteByIds
-  FileModel.findByIds = originalFileFindByIds
-  FileModel.countPendingBySurveyQuestionSession = originalFileCountPendingBySurveyQuestionSession
-  FileModel.listExpiredPending = originalFileListExpiredPending
-  FileModel.listPendingBySubmission = originalFileListPendingBySubmission
+  fileRepository.create = originalFileCreate
+  fileRepository.deleteByIds = originalFileDeleteByIds
+  fileRepository.findByIds = originalFileFindByIds
+  fileRepository.countPendingBySurveyQuestionSession = originalFileCountPendingBySurveyQuestionSession
+  fileRepository.listExpiredPending = originalFileListExpiredPending
+  fileRepository.listPendingBySubmission = originalFileListPendingBySubmission
   surveyAggregateRepository.createSubmission = originalCreateSubmission
 })
 
 test('uploadSurveyFile rejects question-scoped uploads without a submission token', async () => {
-  FileModel.listExpiredPending = async () => []
+  fileRepository.listExpiredPending = async () => []
 
   await assert.rejects(
     () => uploadSurveyFile({
@@ -44,16 +45,16 @@ test('uploadSurveyFile rejects question-scoped uploads without a submission toke
       submissionToken: '',
       uploaderId: 1
     }),
-    error => error?.status === 400 && error?.code === 'UPLOAD_SESSION_REQUIRED'
+    error => error?.status === 400 && error?.body?.error?.code === SURVEY_UPLOAD_ERROR_CODES.UPLOAD_SESSION_REQUIRED
   )
 })
 
 test('uploadSurveyFile stores upload metadata for a valid question-scoped upload', async () => {
   let createPayload = null
 
-  FileModel.listExpiredPending = async () => []
-  FileModel.countPendingBySurveyQuestionSession = async () => 0
-  FileModel.create = async payload => {
+  fileRepository.listExpiredPending = async () => []
+  fileRepository.countPendingBySurveyQuestionSession = async () => 0
+  fileRepository.create = async payload => {
     createPayload = payload
     return { id: 301, ...payload }
   }
@@ -113,7 +114,7 @@ test('submitSurveyResponse rejects duplicate submissions when submitOnce is enab
       forwardedFor: '1.2.3.4',
       remoteAddress: '5.6.7.8'
     }),
-    error => error?.status === 409 && error?.code === 'DUPLICATE_SUBMISSION'
+    error => error?.status === 409 && error?.body?.error?.code === SURVEY_UPLOAD_ERROR_CODES.DUPLICATE_SUBMISSION
   )
 })
 
@@ -121,7 +122,7 @@ test('submitSurveyResponse resolves upload references and forwards normalized pa
   let createSubmissionPayload = null
 
   Answer.countByIp = async () => 0
-  FileModel.findByIds = async () => ([
+  fileRepository.findByIds = async () => ([
     {
       id: 401,
       survey_id: 204,
@@ -134,8 +135,8 @@ test('submitSurveyResponse resolves upload references and forwards normalized pa
       type: 'application/pdf'
     }
   ])
-  FileModel.listPendingBySubmission = async () => []
-  FileModel.deleteByIds = async () => 0
+  fileRepository.listPendingBySubmission = async () => []
+  fileRepository.deleteByIds = async () => 0
   surveyAggregateRepository.createSubmission = async payload => {
     createSubmissionPayload = payload
     return { id: 402 }

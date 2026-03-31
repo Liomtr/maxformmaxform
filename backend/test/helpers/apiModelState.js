@@ -8,10 +8,16 @@ import Answer from '../../src/models/Answer.js'
 import FileModel from '../../src/models/File.js'
 import Position from '../../src/models/Position.js'
 import Flow from '../../src/models/Flow.js'
+import ManagementAiExecution from '../../src/models/ManagementAiExecution.js'
 import QuestionBankRepo from '../../src/models/QuestionBankRepo.js'
 import QuestionBankQuestion from '../../src/models/QuestionBankQuestion.js'
 import Role from '../../src/models/Role.js'
+import SystemConfig from '../../src/models/SystemConfig.js'
 import SurveyResultsSnapshot from '../../src/models/SurveyResultsSnapshot.js'
+import answerRepository from '../../src/repositories/answerRepository.js'
+import fileRepository from '../../src/repositories/fileRepository.js'
+import surveyRepository from '../../src/repositories/surveyRepository.js'
+import surveyResultsSnapshotRepository from '../../src/repositories/surveyResultsSnapshotRepository.js'
 import { resetSurveyResultsObservability } from '../../src/services/surveyResultsService.js'
 
 const originalDeptMethods = {
@@ -115,6 +121,12 @@ const originalFlowMethods = {
   update: Flow.update,
   delete: Flow.delete
 }
+const originalManagementAiExecutionMethods = {
+  list: ManagementAiExecution.list,
+  findByActorAndKey: ManagementAiExecution.findByActorAndKey,
+  create: ManagementAiExecution.create,
+  update: ManagementAiExecution.update
+}
 const originalQuestionBankRepoMethods = {
   list: QuestionBankRepo.list,
   findById: QuestionBankRepo.findById,
@@ -137,11 +149,66 @@ const originalRoleMethods = {
   update: Role.update,
   delete: Role.delete
 }
+const originalSystemConfigMethods = {
+  findByKey: SystemConfig.findByKey,
+  upsert: SystemConfig.upsert
+}
 const originalSurveyResultsSnapshotMethods = {
   findBySurveyId: SurveyResultsSnapshot.findBySurveyId,
   upsert: SurveyResultsSnapshot.upsert,
   deleteBySurveyId: SurveyResultsSnapshot.deleteBySurveyId,
   deleteBySurveyIds: SurveyResultsSnapshot.deleteBySurveyIds
+}
+const originalSurveyRepositoryMethods = {
+  findById: surveyRepository.findById,
+  findByShareCode: surveyRepository.findByShareCode,
+  findByIdentifier: surveyRepository.findByIdentifier,
+  create: surveyRepository.create,
+  update: surveyRepository.update,
+  delete: surveyRepository.delete,
+  softDelete: surveyRepository.softDelete,
+  restore: surveyRepository.restore,
+  incrementResponseCount: surveyRepository.incrementResponseCount,
+  syncResponseCount: surveyRepository.syncResponseCount,
+  list: surveyRepository.list,
+  listTrash: surveyRepository.listTrash,
+  listTrashIds: surveyRepository.listTrashIds,
+  clearTrash: surveyRepository.clearTrash
+}
+const originalAnswerRepositoryMethods = {
+  findById: answerRepository.findById,
+  findByIds: answerRepository.findByIds,
+  list: answerRepository.list,
+  countBySurveyId: answerRepository.countBySurveyId,
+  getAggregateState: answerRepository.getAggregateState,
+  listBySurveyId: answerRepository.listBySurveyId,
+  create: answerRepository.create,
+  countByIp: answerRepository.countByIp,
+  deleteBatch: answerRepository.deleteBatch,
+  deleteBySurveyIds: answerRepository.deleteBySurveyIds
+}
+const originalFileRepositoryMethods = {
+  create: fileRepository.create,
+  findById: fileRepository.findById,
+  findByIds: fileRepository.findByIds,
+  list: fileRepository.list,
+  listByAnswerIds: fileRepository.listByAnswerIds,
+  listBySurveyIds: fileRepository.listBySurveyIds,
+  listAnswerFilesBySurveyId: fileRepository.listAnswerFilesBySurveyId,
+  countPendingBySurveyQuestionSession: fileRepository.countPendingBySurveyQuestionSession,
+  attachToAnswer: fileRepository.attachToAnswer,
+  listExpiredPending: fileRepository.listExpiredPending,
+  listPendingBySubmission: fileRepository.listPendingBySubmission,
+  deleteByIds: fileRepository.deleteByIds,
+  deleteByAnswerIds: fileRepository.deleteByAnswerIds,
+  deleteBySurveyIds: fileRepository.deleteBySurveyIds,
+  delete: fileRepository.delete
+}
+const originalSurveyResultsSnapshotRepositoryMethods = {
+  findBySurveyId: surveyResultsSnapshotRepository.findBySurveyId,
+  upsert: surveyResultsSnapshotRepository.upsert,
+  deleteBySurveyId: surveyResultsSnapshotRepository.deleteBySurveyId,
+  deleteBySurveyIds: surveyResultsSnapshotRepository.deleteBySurveyIds
 }
 
 export function applyDefaultFileStubs() {
@@ -256,6 +323,11 @@ export function resetApiRouteModelState() {
   Flow.update = originalFlowMethods.update
   Flow.delete = originalFlowMethods.delete
 
+  ManagementAiExecution.findByActorAndKey = originalManagementAiExecutionMethods.findByActorAndKey
+  ManagementAiExecution.list = originalManagementAiExecutionMethods.list
+  ManagementAiExecution.create = originalManagementAiExecutionMethods.create
+  ManagementAiExecution.update = originalManagementAiExecutionMethods.update
+
   QuestionBankRepo.list = originalQuestionBankRepoMethods.list
   QuestionBankRepo.findById = originalQuestionBankRepoMethods.findById
   QuestionBankRepo.create = originalQuestionBankRepoMethods.create
@@ -275,10 +347,60 @@ export function resetApiRouteModelState() {
   Role.update = originalRoleMethods.update
   Role.delete = originalRoleMethods.delete
 
+  SystemConfig.findByKey = originalSystemConfigMethods.findByKey
+  SystemConfig.upsert = originalSystemConfigMethods.upsert
+
   SurveyResultsSnapshot.findBySurveyId = originalSurveyResultsSnapshotMethods.findBySurveyId
   SurveyResultsSnapshot.upsert = originalSurveyResultsSnapshotMethods.upsert
   SurveyResultsSnapshot.deleteBySurveyId = originalSurveyResultsSnapshotMethods.deleteBySurveyId
   SurveyResultsSnapshot.deleteBySurveyIds = originalSurveyResultsSnapshotMethods.deleteBySurveyIds
+
+  surveyRepository.findById = originalSurveyRepositoryMethods.findById
+  surveyRepository.findByShareCode = originalSurveyRepositoryMethods.findByShareCode
+  surveyRepository.findByIdentifier = originalSurveyRepositoryMethods.findByIdentifier
+  surveyRepository.create = originalSurveyRepositoryMethods.create
+  surveyRepository.update = originalSurveyRepositoryMethods.update
+  surveyRepository.delete = originalSurveyRepositoryMethods.delete
+  surveyRepository.softDelete = originalSurveyRepositoryMethods.softDelete
+  surveyRepository.restore = originalSurveyRepositoryMethods.restore
+  surveyRepository.incrementResponseCount = originalSurveyRepositoryMethods.incrementResponseCount
+  surveyRepository.syncResponseCount = originalSurveyRepositoryMethods.syncResponseCount
+  surveyRepository.list = originalSurveyRepositoryMethods.list
+  surveyRepository.listTrash = originalSurveyRepositoryMethods.listTrash
+  surveyRepository.listTrashIds = originalSurveyRepositoryMethods.listTrashIds
+  surveyRepository.clearTrash = originalSurveyRepositoryMethods.clearTrash
+
+  answerRepository.findById = originalAnswerRepositoryMethods.findById
+  answerRepository.findByIds = originalAnswerRepositoryMethods.findByIds
+  answerRepository.list = originalAnswerRepositoryMethods.list
+  answerRepository.countBySurveyId = originalAnswerRepositoryMethods.countBySurveyId
+  answerRepository.getAggregateState = originalAnswerRepositoryMethods.getAggregateState
+  answerRepository.listBySurveyId = originalAnswerRepositoryMethods.listBySurveyId
+  answerRepository.create = originalAnswerRepositoryMethods.create
+  answerRepository.countByIp = originalAnswerRepositoryMethods.countByIp
+  answerRepository.deleteBatch = originalAnswerRepositoryMethods.deleteBatch
+  answerRepository.deleteBySurveyIds = originalAnswerRepositoryMethods.deleteBySurveyIds
+
+  fileRepository.create = originalFileRepositoryMethods.create
+  fileRepository.findById = originalFileRepositoryMethods.findById
+  fileRepository.findByIds = originalFileRepositoryMethods.findByIds
+  fileRepository.list = originalFileRepositoryMethods.list
+  fileRepository.listByAnswerIds = originalFileRepositoryMethods.listByAnswerIds
+  fileRepository.listBySurveyIds = originalFileRepositoryMethods.listBySurveyIds
+  fileRepository.listAnswerFilesBySurveyId = originalFileRepositoryMethods.listAnswerFilesBySurveyId
+  fileRepository.countPendingBySurveyQuestionSession = originalFileRepositoryMethods.countPendingBySurveyQuestionSession
+  fileRepository.attachToAnswer = originalFileRepositoryMethods.attachToAnswer
+  fileRepository.listExpiredPending = originalFileRepositoryMethods.listExpiredPending
+  fileRepository.listPendingBySubmission = originalFileRepositoryMethods.listPendingBySubmission
+  fileRepository.deleteByIds = originalFileRepositoryMethods.deleteByIds
+  fileRepository.deleteByAnswerIds = originalFileRepositoryMethods.deleteByAnswerIds
+  fileRepository.deleteBySurveyIds = originalFileRepositoryMethods.deleteBySurveyIds
+  fileRepository.delete = originalFileRepositoryMethods.delete
+
+  surveyResultsSnapshotRepository.findBySurveyId = originalSurveyResultsSnapshotRepositoryMethods.findBySurveyId
+  surveyResultsSnapshotRepository.upsert = originalSurveyResultsSnapshotRepositoryMethods.upsert
+  surveyResultsSnapshotRepository.deleteBySurveyId = originalSurveyResultsSnapshotRepositoryMethods.deleteBySurveyId
+  surveyResultsSnapshotRepository.deleteBySurveyIds = originalSurveyResultsSnapshotRepositoryMethods.deleteBySurveyIds
 
   applyDefaultFileStubs()
 }

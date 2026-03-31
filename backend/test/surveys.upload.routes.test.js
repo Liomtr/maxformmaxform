@@ -8,6 +8,7 @@ import Folder from '../src/models/Folder.js'
 import Answer from '../src/models/Answer.js'
 import FileModel from '../src/models/File.js'
 import { registerApiRouteHarness, UPLOAD_DIR } from './helpers/apiRouteHarness.js'
+import { SURVEY_UPLOAD_ERROR_CODES } from '../../shared/surveyUpload.contract.js'
 const { request, requestRaw, requestPublic } = registerApiRouteHarness()
 
 test('POST /api/surveys/:id/responses rejects unpublished surveys through the service flow', async () => {
@@ -105,7 +106,7 @@ test('POST /api/surveys/:id/uploads rejects files beyond the upload question lim
 
   assert.equal(response.status, 400)
   assert.equal(json.success, false)
-  assert.equal(json.error.code, 'UPLOAD_VALIDATION')
+  assert.equal(json.error.code, SURVEY_UPLOAD_ERROR_CODES.UPLOAD_VALIDATION)
   assert.equal(createCalled, false)
 })
 
@@ -138,7 +139,7 @@ test('POST /api/surveys/:id/responses rejects upload answers with invalid upload
 
   assert.equal(response.status, 400)
   assert.equal(json.success, false)
-  assert.equal(json.error.code, 'VALIDATION')
+  assert.equal(json.error.code, SURVEY_UPLOAD_ERROR_CODES.VALIDATION)
 })
 
 test('POST /api/surveys/:id/responses accepts matrix multiple and dropdown answers', async () => {
@@ -371,7 +372,7 @@ test('POST /api/surveys/:id/responses rejects upload answers beyond the configur
 
   assert.equal(response.status, 400)
   assert.equal(json.success, false)
-  assert.equal(json.error.code, 'VALIDATION')
+  assert.equal(json.error.code, SURVEY_UPLOAD_ERROR_CODES.VALIDATION)
 })
 
 test('POST /api/surveys/:id/responses rejects upload answers bound to another upload question', async () => {
@@ -406,7 +407,7 @@ test('POST /api/surveys/:id/responses rejects upload answers bound to another up
 
   assert.equal(response.status, 400)
   assert.equal(json.success, false)
-  assert.equal(json.error.code, 'VALIDATION')
+  assert.equal(json.error.code, SURVEY_UPLOAD_ERROR_CODES.VALIDATION)
 })
 
 

@@ -1,12 +1,18 @@
-import Survey from '../models/Survey.js'
-import Folder from '../models/Folder.js'
+import folderRepository from '../repositories/folderRepository.js'
 import surveyAggregateRepository from '../repositories/surveyAggregateRepository.js'
+import surveyRepository from '../repositories/surveyRepository.js'
+import surveyResultsSnapshotRepository from '../repositories/surveyResultsSnapshotRepository.js'
 import { normalizeSurveyQuestions, validateSurveyQuestions } from '../utils/questionSchema.js'
 import { removeUploadedFile } from '../utils/uploadStorage.js'
 import { createAuditMessage, recordAudit } from './activity.js'
-import { getSurveyForManagement, resolveRequestedSurveyCreatorId } from './surveyQueryService.js'
-import { invalidateSurveyResultsSnapshot } from './surveyResultsService.js'
-import { normalizeSurveyFolderId, SURVEY_ERROR_CODES, SURVEY_STATUS } from '../../../shared/survey.contract.js'
+import { getSurveyForManagement, resolveRequestedSurveyCreatorId } from './surveyAccessService.js'
+import {
+  normalizeSurveyFolderId,
+  sanitizeWritableSurveySettings,
+  sanitizeWritableSurveyStyle,
+  SURVEY_ERROR_CODES,
+  SURVEY_STATUS
+} from '../../../shared/survey.contract.js'
 
 export { uploadSurveyFile, submitSurveyResponse } from './surveyUploadService.js'
 
@@ -26,26 +32,149 @@ function cleanupStoredFiles(files = []) {
   }
 }
 
-function getSurveyEndTime(survey) {
+function getSurveyEndTimeMeta(survey) {
   const raw = survey?.settings?.endTime
-  if (!raw) return null
+  if (!raw) return { value: null, invalid: false }
 
   const date = new Date(raw)
-  return Number.isNaN(date.getTime()) ? null : date
+  if (Number.isNaN(date.getTime())) {
+    return { value: null, invalid: true }
+  }
+
+  return { value: date, invalid: false }
+}
+
+function getSurveyEndTime(survey) {
+  return getSurveyEndTimeMeta(survey).value
+}
+
+export function validateSurveyDraft({ title, description, questions, settings, style }) {
+  const normalizedQuestions = normalizeSurveyQuestions(questions || [])
+  const normalizedSettings = sanitizeWritableSurveySettings(settings)
+  const normalizedStyle = sanitizeWritableSurveyStyle(style)
+  const normalized = {
+    title: String(title || ''),
+    description: description === undefined ? undefined : (description == null ? '' : String(description)),
+    questions: normalizedQuestions,
+    settings: normalizedSettings,
+    style: normalizedStyle
+  }
+
+  if (!normalized.title.trim()) {
+    return {
+      valid: false,
+      error: 'Title is required',
+      normalized
+    }
+  }
+
+  const { error } = validateSurveyQuestions(normalizedQuestions)
+  if (error) {
+    return {
+      valid: false,
+      error,
+      normalized
+    }
+  }
+
+  const endTimeMeta = getSurveyEndTimeMeta({ settings: normalizedSettings })
+  if (endTimeMeta.invalid) {
+    return {
+      valid: false,
+      error: 'End time is invalid',
+      normalized
+    }
+  }
+
+  const endTime = endTimeMeta.value
+  if (endTime && endTime.getTime() <= Date.now()) {
+    return {
+      valid: false,
+      error: 'End time must be later than now',
+      normalized
+    }
+  }
+
+  return {
+    valid: true,
+    error: null,
+    normalized
+  }
+}
+
+function isPlainRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function normalizeSurveyDryRunPayload(body = {}) {
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body)
+    } catch {
+      throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'Survey JSON is invalid')
+    }
+  }
+
+  if (!isPlainRecord(body)) {
+    throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'Survey dry-run payload must be an object')
+  }
+
+  if (typeof body.json === 'string') {
+    const raw = body.json.trim()
+    if (!raw) {
+      throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'Survey JSON is required')
+    }
+
+    let parsed
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'Survey JSON is invalid')
+    }
+
+    if (!isPlainRecord(parsed)) {
+      throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'Survey JSON root must be an object')
+    }
+
+    return parsed
+  }
+
+  if (body.survey !== undefined) {
+    if (!isPlainRecord(body.survey)) {
+      throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'survey must be an object')
+    }
+
+    return body.survey
+  }
+
+  return body
+}
+
+function assertValidSurveyDraft(input) {
+  const result = validateSurveyDraft(input)
+  if (!result.valid) {
+    throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, result.error || 'Survey structure is invalid')
+  }
+
+  return result.normalized
 }
 
 export async function createSurvey({ actor, title, description, questions, settings, style }) {
-  if (!title || !title.trim()) {
-    throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'Title is required')
-  }
-
-  const survey = await Survey.create({
+  const normalized = assertValidSurveyDraft({
     title,
     description,
-    creator_id: actor.sub,
-    questions: normalizeSurveyQuestions(questions || []),
+    questions,
     settings,
     style
+  })
+
+  const survey = await surveyRepository.create({
+    title: normalized.title,
+    description: normalized.description,
+    creator_id: actor.sub,
+    questions: normalized.questions,
+    settings: normalized.settings,
+    style: normalized.style
   })
 
   await recordAudit({
@@ -60,15 +189,23 @@ export async function createSurvey({ actor, title, description, questions, setti
 }
 
 export async function updateSurvey({ survey, title, description, questions, settings, style }) {
-  const updated = await Survey.update(survey.id, {
-    title,
-    description,
-    questions: questions === undefined ? undefined : normalizeSurveyQuestions(questions),
-    settings,
-    style
+  const normalized = assertValidSurveyDraft({
+    title: title === undefined ? survey?.title : title,
+    description: description === undefined ? survey?.description : description,
+    questions: questions === undefined ? survey?.questions : questions,
+    settings: settings === undefined ? survey?.settings : settings,
+    style: style === undefined ? survey?.style : style
   })
 
-  await invalidateSurveyResultsSnapshot({ surveyId: survey.id })
+  const updated = await surveyRepository.update(survey.id, {
+    title: title === undefined ? undefined : normalized.title,
+    description: description === undefined ? undefined : normalized.description,
+    questions: questions === undefined ? undefined : normalized.questions,
+    settings: settings === undefined ? undefined : normalized.settings,
+    style: style === undefined ? undefined : normalized.style
+  })
+
+  await surveyResultsSnapshotRepository.deleteBySurveyId(survey.id)
   return updated
 }
 
@@ -78,8 +215,8 @@ export async function updateManagedSurvey({ actor, identifier, title, descriptio
 }
 
 export async function moveSurveyToTrash({ survey, actor }) {
-  const deleted = await Survey.softDelete(survey.id, actor.sub)
-  await invalidateSurveyResultsSnapshot({ surveyId: survey.id })
+  const deleted = await surveyRepository.softDelete(survey.id, actor.sub)
+  await surveyResultsSnapshotRepository.deleteBySurveyId(survey.id)
   await recordAudit({
     actor,
     action: 'survey.trash.move',
@@ -109,8 +246,8 @@ export async function restoreSurvey({ survey, actor }) {
     throw createHttpError(400, SURVEY_ERROR_CODES.NOT_IN_TRASH, 'Survey is not in trash')
   }
 
-  const restored = await Survey.restore(survey.id)
-  await invalidateSurveyResultsSnapshot({ surveyId: survey.id })
+  const restored = await surveyRepository.restore(survey.id)
+  await surveyResultsSnapshotRepository.deleteBySurveyId(survey.id)
   await recordAudit({
     actor,
     action: 'survey.restore',
@@ -162,13 +299,18 @@ export async function publishSurvey({ survey, actor }) {
     throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, error)
   }
 
-  const endTime = getSurveyEndTime(survey)
+  const endTimeMeta = getSurveyEndTimeMeta(survey)
+  if (endTimeMeta.invalid) {
+    throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'End time is invalid')
+  }
+
+  const endTime = endTimeMeta.value
   if (endTime && endTime.getTime() <= Date.now()) {
     throw createHttpError(400, SURVEY_ERROR_CODES.VALIDATION, 'End time must be later than now')
   }
 
-  const updated = await Survey.update(survey.id, { status: SURVEY_STATUS.PUBLISHED, questions: normalizedQuestions })
-  await invalidateSurveyResultsSnapshot({ surveyId: survey.id })
+  const updated = await surveyRepository.update(survey.id, { status: SURVEY_STATUS.PUBLISHED, questions: normalizedQuestions })
+  await surveyResultsSnapshotRepository.deleteBySurveyId(survey.id)
   await recordAudit({ actor, action: 'survey.publish', targetType: 'survey', targetId: survey.id, detail: `Published survey ${survey.title}` })
   await createAuditMessage({
     recipientId: actor.sub,
@@ -187,8 +329,8 @@ export async function publishManagedSurvey({ actor, identifier }) {
 }
 
 export async function closeSurvey({ survey, actor }) {
-  const updated = await Survey.update(survey.id, { status: SURVEY_STATUS.CLOSED })
-  await invalidateSurveyResultsSnapshot({ surveyId: survey.id })
+  const updated = await surveyRepository.update(survey.id, { status: SURVEY_STATUS.CLOSED })
+  await surveyResultsSnapshotRepository.deleteBySurveyId(survey.id)
   await recordAudit({
     actor,
     action: 'survey.close',
@@ -241,13 +383,13 @@ export async function forceDeleteManagedSurvey({ actor, identifier }) {
 
 export async function moveSurveyToFolder({ survey, actor, folderId }) {
   if (folderId !== null) {
-    const folder = await Folder.findById(folderId, actor.sub)
+    const folder = await folderRepository.findById(folderId, actor.sub)
     if (!folder) {
       throw createHttpError(404, SURVEY_ERROR_CODES.FOLDER_NOT_FOUND, 'Folder not found')
     }
   }
 
-  const updated = await Survey.update(survey.id, { folder_id: folderId })
+  const updated = await surveyRepository.update(survey.id, { folder_id: folderId })
   await recordAudit({
     actor,
     action: 'survey.move_folder',

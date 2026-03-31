@@ -2,6 +2,12 @@ import { throwManagementError, throwManagementPolicyError } from '../http/manage
 import { getAdminPolicy } from '../policies/adminPolicy.js'
 import { getAuthenticatedActorPolicy } from '../policies/actorPolicy.js'
 import positionRepository from '../repositories/positionRepository.js'
+import {
+  ensurePlainObjectPayload,
+  normalizeOptionalBoolean,
+  normalizeOptionalTrimmedString,
+  normalizeRequiredTrimmedString
+} from '../utils/managementPayload.js'
 import { recordManagementAction, runManagementTransaction } from './activity.js'
 import { createPositionDto, MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
@@ -21,14 +27,19 @@ export async function listManagedPositions({ actor }) {
 
 export async function createManagedPosition({ actor, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
-    const normalizedName = String(body.name || '').trim()
-    const normalizedCode = String(body.code || '').trim() || null
-
-    if (!normalizedName) {
-      throwManagementError(400, MANAGEMENT_ERROR_CODES.POSITION_NAME_REQUIRED, 'Position name is required')
-    }
+    const normalizedName = normalizeRequiredTrimmedString(body.name, {
+      field: 'name',
+      code: MANAGEMENT_ERROR_CODES.POSITION_NAME_REQUIRED,
+      message: 'Position name is required'
+    })
+    const normalizedCode = normalizeOptionalTrimmedString(body.code, {
+      field: 'code',
+      allowNull: true,
+      emptyToNull: true
+    })
 
     if (normalizedCode) {
       const existing = await positionRepository.findByCode(normalizedCode, { db })
@@ -40,8 +51,12 @@ export async function createManagedPosition({ actor, body = {} }) {
     const position = await positionRepository.create({
       name: normalizedName,
       code: normalizedCode,
-      is_virtual: Boolean(body.is_virtual ?? body.isVirtual),
-      remark: body.remark == null ? null : String(body.remark)
+      is_virtual: normalizeOptionalBoolean(body.is_virtual ?? body.isVirtual, { field: 'is_virtual' }) ?? false,
+      remark: normalizeOptionalTrimmedString(body.remark, {
+        field: 'remark',
+        allowNull: true,
+        emptyToNull: true
+      })
     }, { db })
     await recordManagementAction({
       actor,
@@ -65,6 +80,7 @@ export async function createManagedPosition({ actor, body = {} }) {
 
 export async function updateManagedPosition({ actor, positionId, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
     const existing = await positionRepository.findById(positionId, { db })
@@ -72,7 +88,11 @@ export async function updateManagedPosition({ actor, positionId, body = {} }) {
       throwManagementError(404, MANAGEMENT_ERROR_CODES.POSITION_NOT_FOUND, 'Position not found')
     }
 
-    const normalizedCode = body.code === undefined ? undefined : (String(body.code || '').trim() || null)
+    const normalizedCode = normalizeOptionalTrimmedString(body.code, {
+      field: 'code',
+      allowNull: true,
+      emptyToNull: true
+    })
     if (normalizedCode) {
       const duplicate = await positionRepository.findByCode(normalizedCode, { db })
       if (duplicate && Number(duplicate.id) !== Number(existing.id)) {
@@ -81,12 +101,22 @@ export async function updateManagedPosition({ actor, positionId, body = {} }) {
     }
 
     const position = await positionRepository.update(positionId, {
-      name: body.name === undefined ? undefined : String(body.name || '').trim(),
+      name: body.name === undefined
+        ? undefined
+        : normalizeRequiredTrimmedString(body.name, {
+            field: 'name',
+            code: MANAGEMENT_ERROR_CODES.POSITION_NAME_REQUIRED,
+            message: 'Position name is required'
+          }),
       code: normalizedCode,
       is_virtual: body.is_virtual === undefined && body.isVirtual === undefined
         ? undefined
-        : Boolean(body.is_virtual ?? body.isVirtual),
-      remark: body.remark === undefined ? undefined : (body.remark == null ? null : String(body.remark))
+        : normalizeOptionalBoolean(body.is_virtual ?? body.isVirtual, { field: 'is_virtual' }),
+      remark: normalizeOptionalTrimmedString(body.remark, {
+        field: 'remark',
+        allowNull: true,
+        emptyToNull: true
+      })
     }, { db })
     await recordManagementAction({
       actor,

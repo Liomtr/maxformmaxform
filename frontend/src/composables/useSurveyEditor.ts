@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus'
 import { createSurvey, publishSurvey, updateSurvey } from '@/api/surveys'
 import { useEditorBatch } from '@/composables/editor/editor-batch'
 import { useEditorCore } from '@/composables/editor/editor-core'
+import type { QuestionBankExportMetadata } from '@/composables/editor/editor-core'
 import { useEditorLogic } from '@/composables/editor/editor-logic'
 import { useEditorQuota } from '@/composables/editor/editor-quota'
 import { useEditorRichtext } from '@/composables/editor/editor-richtext'
@@ -10,6 +11,7 @@ import {
   createSurveyPreviewPanelContract,
   type SurveyPreviewPanelContract
 } from '@/views/survey/surveyPreviewPanelContract'
+import type { QuestionBankQuestionDTO, QuestionBankQuestionFormDTO } from '../../../shared/management.contract.js'
 
 type EditorCoreState = ReturnType<typeof useEditorCore>
 type EditorRichtextState = ReturnType<typeof useEditorRichtext>
@@ -95,6 +97,8 @@ interface SurveyEditorContextBoundary {
   categoryExpanded: EditorCoreState['categoryExpanded']
   toggleCategory: EditorCoreState['toggleCategory']
   addQuestionByType: EditorCoreState['addQuestionByType']
+  importQuestionBankQuestion: (question: QuestionBankQuestionDTO) => EditorCoreState['surveyForm']['questions'][number]
+  buildQuestionBankPayload: (questionIndex: number, metadata?: QuestionBankExportMetadata) => QuestionBankQuestionFormDTO | null
   aiPrompt: EditorCoreState['aiPrompt']
   generateByAI: EditorCoreState['generateByAI']
   outlineListEl: EditorCoreState['outlineListEl']
@@ -227,6 +231,8 @@ const questionConfigPanelKeys = [
   'categoryExpanded',
   'toggleCategory',
   'addQuestionByType',
+  'importQuestionBankQuestion',
+  'buildQuestionBankPayload',
   'showAIHelper',
   'aiPrompt',
   'generateByAI',
@@ -505,6 +511,8 @@ function createSurveyEditorContracts({
       categoryExpanded: core.categoryExpanded,
       toggleCategory: core.toggleCategory,
       addQuestionByType: core.addQuestionByType,
+      importQuestionBankQuestion: core.importQuestionBankQuestion,
+      buildQuestionBankPayload: core.buildQuestionBankPayload,
       showAIHelper: core.showAIHelper,
       aiPrompt: core.aiPrompt,
       generateByAI: core.generateByAI,

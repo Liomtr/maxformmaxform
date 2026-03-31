@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { asyncRoute } from '../http/asyncRoute.js'
+import { throwManagementError } from '../http/managementErrors.js'
 import { authRequired } from '../middlewares/auth.js'
 import {
   createManagedUser,
@@ -10,6 +11,8 @@ import {
   resetManagedUserPassword,
   updateManagedUser
 } from '../services/userService.js'
+import { normalizeRequiredIntegerParam } from '../utils/routeParams.js'
+import { MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
 const router = Router()
 
@@ -36,17 +39,26 @@ router.post('/import', asyncRoute(async (req, res) => {
 }))
 
 router.put('/:id', asyncRoute(async (req, res) => {
-  const user = await updateManagedUser({ actor: req.user, userId: req.params.id, body: req.body })
+  const userId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  const user = await updateManagedUser({ actor: req.user, userId, body: req.body })
   res.json({ success: true, data: user })
 }))
 
 router.put('/:id/password', asyncRoute(async (req, res) => {
-  await resetManagedUserPassword({ actor: req.user, userId: req.params.id, body: req.body })
+  const userId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  await resetManagedUserPassword({ actor: req.user, userId, body: req.body })
   res.json({ success: true })
 }))
 
 router.delete('/:id', asyncRoute(async (req, res) => {
-  await deleteManagedUser({ actor: req.user, userId: req.params.id })
+  const userId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  await deleteManagedUser({ actor: req.user, userId })
   res.json({ success: true })
 }))
 

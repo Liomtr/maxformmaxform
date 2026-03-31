@@ -1,6 +1,11 @@
 import { throwManagementError, throwManagementPolicyError } from '../http/managementErrors.js'
 import { getAdminPolicy } from '../policies/adminPolicy.js'
 import flowRepository from '../repositories/flowRepository.js'
+import {
+  ensurePlainObjectPayload,
+  normalizeOptionalTrimmedString,
+  normalizeRequiredTrimmedString
+} from '../utils/managementPayload.js'
 import { recordManagementAction, runManagementTransaction } from './activity.js'
 import { createFlowDto, MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
@@ -17,13 +22,11 @@ function normalizeFlowName(name, { required = false } = {}) {
     }
     return undefined
   }
-
-  const normalized = String(name || '').trim()
-  if (!normalized) {
-    throwManagementError(400, MANAGEMENT_ERROR_CODES.FLOW_NAME_REQUIRED, 'Flow name is required')
-  }
-
-  return normalized
+  return normalizeRequiredTrimmedString(name, {
+    field: 'name',
+    code: MANAGEMENT_ERROR_CODES.FLOW_NAME_REQUIRED,
+    message: 'Flow name is required'
+  })
 }
 
 function normalizeFlowStatus(status, { required = false, defaultValue } = {}) {
@@ -35,7 +38,11 @@ function normalizeFlowStatus(status, { required = false, defaultValue } = {}) {
     return undefined
   }
 
-  const normalized = String(status || '').trim()
+  const normalized = normalizeRequiredTrimmedString(status, {
+    field: 'status',
+    code: MANAGEMENT_ERROR_CODES.FLOW_STATUS_REQUIRED,
+    message: 'Flow status is required'
+  })
   if (!FLOW_STATUSES.has(normalized)) {
     throwManagementError(400, MANAGEMENT_ERROR_CODES.FLOW_STATUS_INVALID, 'Flow status is invalid')
   }
@@ -44,8 +51,11 @@ function normalizeFlowStatus(status, { required = false, defaultValue } = {}) {
 }
 
 function normalizeFlowDescription(description) {
-  if (description === undefined) return undefined
-  return description == null ? null : (String(description).trim() || null)
+  return normalizeOptionalTrimmedString(description, {
+    field: 'description',
+    allowNull: true,
+    emptyToNull: true
+  })
 }
 
 async function getManagedFlowOrThrow(flowId, options = {}) {
@@ -64,6 +74,7 @@ export async function listManagedFlows({ actor }) {
 
 export async function createManagedFlow({ actor, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
     const flow = await flowRepository.create({
@@ -95,6 +106,7 @@ export async function createManagedFlow({ actor, body = {} }) {
 
 export async function updateManagedFlow({ actor, flowId, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
   return runManagementTransaction(async db => {
     await getManagedFlowOrThrow(flowId, { db })
 

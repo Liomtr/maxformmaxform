@@ -1,6 +1,20 @@
 import { throwManagementError, throwManagementPolicyError } from '../http/managementErrors.js'
 import { getAdminPolicy } from '../policies/adminPolicy.js'
 import userRepository from '../repositories/userRepository.js'
+import {
+  ensurePlainObjectPayload,
+  isPlainObject,
+  normalizeOptionalBoolean,
+  normalizeOptionalId,
+  normalizeOptionalTrimmedString,
+  normalizeRequiredTrimmedString
+} from '../utils/managementPayload.js'
+import {
+  ensureQueryObject,
+  normalizeOptionalBooleanQuery as normalizeOptionalBooleanQueryParam,
+  normalizeOptionalIntegerQuery,
+  normalizeStrictPagination
+} from '../utils/queryValidation.js'
 import { recordManagementAction, runManagementTransaction } from './activity.js'
 import {
   createUserDto,
@@ -14,10 +28,21 @@ function ensureAdmin(actor) {
   throwManagementPolicyError(getAdminPolicy(actor))
 }
 
+function throwInvalidQuery(message) {
+  throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+}
+
 export async function listManagedUsers({ actor, query = {} }) {
   ensureAdmin(actor)
 
-  const normalized = normalizeUserListQuery(query)
+  ensureQueryObject(query, throwInvalidQuery)
+  const pagination = normalizeStrictPagination(query, { page: 1, pageSize: 20 }, throwInvalidQuery)
+  const normalized = normalizeUserListQuery({
+    ...query,
+    ...pagination,
+    dept_id: normalizeOptionalIntegerQuery(query.dept_id, 'dept_id', throwInvalidQuery, { positive: true }),
+    is_active: normalizeOptionalBooleanQueryParam(query.is_active, 'is_active', throwInvalidQuery)
+  })
   const result = await userRepository.list(normalized)
   return createUserPageResult({
     ...result,
@@ -39,12 +64,27 @@ export async function getManagedUser({ actor, identity }) {
 
 export async function createManagedUser({ actor, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
-    const { username, email, password, role_id, dept_id, position_id } = body
-    if (!username || !password) {
-      throwManagementError(400, MANAGEMENT_ERROR_CODES.USER_REQUIRED_FIELDS, 'Username and password are required')
-    }
+    const username = normalizeRequiredTrimmedString(body.username, {
+      field: 'username',
+      code: MANAGEMENT_ERROR_CODES.USER_REQUIRED_FIELDS,
+      message: 'Username and password are required'
+    })
+    const password = normalizeRequiredTrimmedString(body.password, {
+      field: 'password',
+      code: MANAGEMENT_ERROR_CODES.USER_REQUIRED_FIELDS,
+      message: 'Username and password are required'
+    })
+    const email = normalizeOptionalTrimmedString(body.email, {
+      field: 'email',
+      allowNull: true,
+      emptyToNull: true
+    })
+    const role_id = normalizeOptionalId(body.role_id, { field: 'role_id' })
+    const dept_id = normalizeOptionalId(body.dept_id, { field: 'dept_id' })
+    const position_id = normalizeOptionalId(body.position_id, { field: 'position_id', allowNull: true })
 
     const existing = await userRepository.findByUsername(username, { db })
     if (existing) {
@@ -75,6 +115,7 @@ export async function createManagedUser({ actor, body = {} }) {
 
 export async function importManagedUsers({ actor, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   const users = Array.isArray(body.users) ? body.users : null
   if (!users) {
@@ -89,10 +130,16 @@ export async function importManagedUsers({ actor, body = {} }) {
   const seen = new Set()
 
   for (let index = 0; index < users.length; index += 1) {
-    const row = users[index] || {}
-    const username = String(row.username || '').trim()
-    const email = row.email ? String(row.email).trim() : undefined
-    const password = String(row.password || '').trim()
+    const row = users[index]
+    if (!isPlainObject(row)) {
+      result.skipped += 1
+      result.errors.push({ index, row: index + 1, username: '', reason: 'row must be an object' })
+      continue
+    }
+
+    const username = typeof row.username === 'string' ? row.username.trim() : ''
+    const email = typeof row.email === 'string' ? row.email.trim() : undefined
+    const password = typeof row.password === 'string' ? row.password.trim() : ''
     const role_id = row.role_id !== undefined && row.role_id !== null && row.role_id !== '' ? Number(row.role_id) : undefined
     const dept_id = row.dept_id !== undefined && row.dept_id !== null && row.dept_id !== '' ? Number(row.dept_id) : undefined
     const position_id = row.position_id !== undefined && row.position_id !== null && row.position_id !== '' ? Number(row.position_id) : undefined
@@ -159,9 +206,18 @@ export async function importManagedUsers({ actor, body = {} }) {
 
 export async function updateManagedUser({ actor, userId, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
-    const { email, is_active, dept_id, role_id, position_id } = body
+    const email = normalizeOptionalTrimmedString(body.email, {
+      field: 'email',
+      allowNull: true,
+      emptyToNull: true
+    })
+    const is_active = normalizeOptionalBoolean(body.is_active, { field: 'is_active' })
+    const dept_id = normalizeOptionalId(body.dept_id, { field: 'dept_id', allowNull: true })
+    const role_id = normalizeOptionalId(body.role_id, { field: 'role_id', allowNull: true })
+    const position_id = normalizeOptionalId(body.position_id, { field: 'position_id', allowNull: true })
     const user = await userRepository.update(userId, { email, is_active, dept_id, role_id, position_id }, { db })
 
     if (!user) {
@@ -191,12 +247,14 @@ export async function updateManagedUser({ actor, userId, body = {} }) {
 
 export async function resetManagedUserPassword({ actor, userId, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   await runManagementTransaction(async db => {
-    const { password } = body
-    if (!password) {
-      throwManagementError(400, MANAGEMENT_ERROR_CODES.USER_PASSWORD_REQUIRED, 'Password is required')
-    }
+    const password = normalizeRequiredTrimmedString(body.password, {
+      field: 'password',
+      code: MANAGEMENT_ERROR_CODES.USER_PASSWORD_REQUIRED,
+      message: 'Password is required'
+    })
 
     const user = await userRepository.findById(userId, { db })
     if (!user) {

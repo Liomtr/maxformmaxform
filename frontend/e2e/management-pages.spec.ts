@@ -234,6 +234,8 @@ test.describe('Management Coverage Browser E2E', () => {
     const admin = await loginUser(request, 'admin', '123456')
     const repoName = uniqueValue('e2e-repo')
     const questionTitle = uniqueValue('e2e-question')
+    const questionStem = '请选择最符合你当前登录频率的一项。'
+    const optionLabels = ['每天', '每周']
 
     await withAuth(page, admin.token)
     await page.goto('/admin/repos')
@@ -249,11 +251,17 @@ test.describe('Management Coverage Browser E2E', () => {
     const drawer = page.getByTestId('repo-questions-drawer')
     await expect(drawer).toBeVisible()
     await page.getByTestId('repo-question-title-input').fill(questionTitle)
+    await page.getByTestId('repo-question-stem-input').fill(questionStem)
+    await page.getByTestId('repo-question-options-input').fill(optionLabels.join('\n'))
     await page.getByTestId('repo-question-add-button').click()
 
     const questionRow = page.locator('.el-drawer .el-table__row', { hasText: questionTitle }).first()
     await expect(questionRow).toBeVisible()
     await expect(questionRow.locator('[data-testid^="repo-question-type-"]')).toHaveText('radio')
+    await expect(questionRow.locator('[data-testid^="repo-question-stem-"]')).toContainText(questionStem)
+    await expect(questionRow.locator('[data-testid^="repo-question-option-count-"]')).toHaveText('2 项')
+    await expect(questionRow.locator('[data-testid^="repo-question-option-preview-"]')).toContainText(optionLabels[0])
+    await expect(questionRow.locator('[data-testid^="repo-question-option-preview-"]')).toContainText(optionLabels[1])
 
     await questionRow.locator('[data-testid^="repo-question-delete-button-"]').click()
     await expect(page.locator('.el-drawer .el-table__row', { hasText: questionTitle })).toHaveCount(0)

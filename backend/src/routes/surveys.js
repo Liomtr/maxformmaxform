@@ -3,12 +3,13 @@ import rateLimit from 'express-rate-limit'
 import { asyncRoute } from '../http/asyncRoute.js'
 import { authRequired, optionalAuth } from '../middlewares/auth.js'
 import {
-  getManagedSurveyResults,
-  getPublicSurveyView,
-  getSharedSurveyView,
   listManagedSurveys,
   listManagedSurveyTrash
 } from '../services/surveyQueryService.js'
+import {
+  getSurveyForPublicView,
+  getSharedSurveyForPublicView
+} from '../services/surveyAccessService.js'
 import {
   clearManagedSurveyTrash,
   closeManagedSurvey,
@@ -18,10 +19,14 @@ import {
   moveManagedSurveyToTrash,
   publishManagedSurvey,
   restoreManagedSurvey,
+  normalizeSurveyDryRunPayload,
   updateManagedSurvey,
+  validateSurveyDraft,
 } from '../services/surveyCommandService.js'
-import { createSurveySubmissionDto, submitSurveyResponseForRequest, uploadSurveyFileForRequest } from '../services/surveyUploadService.js'
+import { getManagedSurveyResults } from '../services/surveyResultsService.js'
+import { submitSurveyResponseForRequest, uploadSurveyFileForRequest } from '../services/surveyUploadService.js'
 import { upload } from '../utils/uploadStorage.js'
+import { createSurveySubmissionDto } from '../../../shared/surveyUpload.contract.js'
 
 const router = Router()
 const publicUploadLimiter = rateLimit({
@@ -58,8 +63,31 @@ router.post('/', authRequired, asyncRoute(async (req, res) => {
   res.json({ success: true, data: survey })
 }))
 
+router.post('/validate', authRequired, asyncRoute(async (req, res) => {
+  const result = validateSurveyDraft({
+    title: req.body?.title,
+    description: req.body?.description,
+    questions: req.body?.questions,
+    settings: req.body?.settings,
+    style: req.body?.style
+  })
+  res.json({ success: true, data: result })
+}))
+
+router.post('/dry-run', authRequired, asyncRoute(async (req, res) => {
+  const payload = normalizeSurveyDryRunPayload(req.body)
+  const result = validateSurveyDraft({
+    title: payload?.title,
+    description: payload?.description,
+    questions: payload?.questions,
+    settings: payload?.settings,
+    style: payload?.style
+  })
+  res.json({ success: true, data: result })
+}))
+
 router.get('/share/:code', optionalAuth, asyncRoute(async (req, res) => {
-  const survey = await getSharedSurveyView({
+  const survey = await getSharedSurveyForPublicView({
     actor: req.user,
     shareCode: req.params.code
   })
@@ -67,7 +95,7 @@ router.get('/share/:code', optionalAuth, asyncRoute(async (req, res) => {
 }))
 
 router.get('/:id', optionalAuth, asyncRoute(async (req, res) => {
-  const survey = await getPublicSurveyView({
+  const survey = await getSurveyForPublicView({
     actor: req.user,
     identifier: req.params.id
   })

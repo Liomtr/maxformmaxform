@@ -1,4 +1,32 @@
 import type { PaginatedResultDTO, PaginationQueryDTO } from './pagination.contract.js'
+export type {
+  AnswerBatchDeleteResultDTO,
+  AnswerCountDTO,
+  AnswerDTO,
+  AnswerErrorCode,
+  AnswerItemDTO,
+  AnswerListQueryDTO,
+  AnswerPageDTO
+} from './answer.contract.js'
+export type {
+  SurveySubmitResultDTO,
+  SurveyUploadErrorCode,
+  UploadedSurveyFileDTO
+} from './surveyUpload.contract.js'
+export {
+  ANSWER_ERROR_CODES,
+  ANSWER_PAGINATION_DEFAULTS,
+  createAnswerBatchDeleteResult,
+  createAnswerCountDto,
+  createAnswerDto,
+  createAnswerPageResult,
+  normalizeAnswerListQuery
+} from './answer.contract.js'
+export {
+  SURVEY_UPLOAD_ERROR_CODES,
+  createSurveySubmissionDto,
+  createSurveyUploadDto
+} from './surveyUpload.contract.js'
 
 export interface QuestionOptionDTO {
   label: string
@@ -8,7 +36,7 @@ export interface QuestionOptionDTO {
   rich?: boolean
   desc?: string
   hidden?: boolean
-  visibleWhen?: unknown[]
+  visibleWhen?: VisibleWhenDTO
   exclusive?: boolean
   defaultSelected?: boolean
   quotaLimit?: number
@@ -22,6 +50,75 @@ export interface QuestionOptionDTO {
   __remaining?: number | null
 }
 
+export type QuestionLogicPrimitiveDTO = string | number | boolean | null
+export type QuestionLogicValueDTO = QuestionLogicPrimitiveDTO | QuestionLogicPrimitiveDTO[]
+export type QuestionLogicOperatorDTO =
+  | 'eq'
+  | 'neq'
+  | 'in'
+  | 'nin'
+  | 'includes'
+  | 'notIncludes'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'regex'
+  | 'overlap'
+
+export interface QuestionLogicConditionDTO {
+  qid: string | number
+  op: QuestionLogicOperatorDTO
+  value: QuestionLogicValueDTO
+}
+
+export type VisibleWhenDTO = QuestionLogicConditionDTO[][]
+
+export interface QuestionLogicDTO {
+  visibleWhen?: VisibleWhenDTO
+}
+
+export interface QuestionExamConfigDTO {
+  score?: number
+  correctAnswer?: unknown
+}
+
+export type QuestionJumpTargetDTO = 'end' | 'invalid' | number | `${number}`
+
+export interface QuestionJumpLogicDTO {
+  byOption?: Record<string, QuestionJumpTargetDTO>
+  unconditional?: QuestionJumpTargetDTO
+}
+
+export interface QuestionOptionGroupDTO {
+  name?: string
+  from?: number
+  to?: number
+  random?: boolean
+}
+
+export type QuestionQuotaModeDTO = 'explicit' | 'implicit'
+
+export interface QuestionQuotaSettingsDTO {
+  quotasEnabled?: boolean
+  quotaMode?: QuestionQuotaModeDTO
+  quotaShowRemaining?: boolean
+  quotaFullText?: string
+}
+
+export interface QuestionValidationDTO {
+  min?: number
+  max?: number
+  step?: number
+  minLabel?: string
+  maxLabel?: string
+  maxFiles?: number
+  maxSizeMb?: number
+  maxSize?: number
+  accept?: string
+  [key: string]: unknown
+}
+
 export interface UploadQuestionConfigDTO {
   maxFiles?: number
   maxSizeMb?: number
@@ -33,7 +130,7 @@ export interface MatrixQuestionConfigDTO {
   selectionType?: 'single' | 'multiple'
 }
 
-export interface QuestionDTO {
+export interface QuestionDTO extends QuestionQuotaSettingsDTO {
   id: string
   type: string | number
   uiType?: number
@@ -43,18 +140,14 @@ export interface QuestionDTO {
   required?: boolean
   options?: QuestionOptionDTO[]
   optionOrder?: 'none' | 'all' | 'flip' | 'firstFixed' | 'lastFixed'
-  validation?: Record<string, unknown>
+  validation?: QuestionValidationDTO
   upload?: UploadQuestionConfigDTO
   matrix?: MatrixQuestionConfigDTO
-  logic?: Record<string, unknown>
-  examConfig?: { score?: number; correctAnswer?: unknown }
-  jumpLogic?: Record<string, unknown>
-  optionGroups?: unknown[]
+  logic?: QuestionLogicDTO
+  examConfig?: QuestionExamConfigDTO
+  jumpLogic?: QuestionJumpLogicDTO
+  optionGroups?: QuestionOptionGroupDTO[]
   hideSystemNumber?: boolean
-  quotasEnabled?: boolean
-  quotaMode?: string
-  quotaShowRemaining?: boolean
-  quotaFullText?: string
   autoSelectOnAppear?: boolean
   order?: number
 }
@@ -124,37 +217,32 @@ export interface SurveyTrashListQueryDTO extends PaginationQueryDTO {
   createdBy?: string
 }
 
-export interface AnswerDTO {
-  id: number
-  survey_id: number
-  surveyId?: number
-  answers_data: Array<Record<string, unknown>>
-  ip_address?: string
-  user_agent?: string
-  duration?: number
-  status?: string
-  submitted_at?: string
-  submittedAt?: string
+export interface SurveyValidationResultDTO {
+  valid: boolean
+  error: string | null
+  normalized: {
+    title: string
+    description?: string
+    questions: Partial<QuestionDTO>[]
+    settings?: Partial<SurveySettingsDTO>
+    style?: Partial<SurveyStyleDTO>
+  }
 }
 
-export interface AnswerListQueryDTO extends PaginationQueryDTO {
-  survey_id?: number | string | null
-  startTime?: string | null
-  endTime?: string | null
-}
-
-export interface UploadedSurveyFileDTO {
-  id: number
-  name: string
-  url: string
-  size: number
-  type: string
-  surveyId: number
-  uploadToken: string
-}
-
-export interface SurveySubmitResultDTO {
-  id: number
+export interface SurveyDryRunPayloadDTO {
+  json?: string
+  survey?: {
+    title?: string
+    description?: string
+    questions?: Partial<QuestionDTO>[]
+    settings?: Partial<SurveySettingsDTO>
+    style?: Partial<SurveyStyleDTO>
+  }
+  title?: string
+  description?: string
+  questions?: Partial<QuestionDTO>[]
+  settings?: Partial<SurveySettingsDTO>
+  style?: Partial<SurveyStyleDTO>
 }
 
 export interface SurveyResultOptionStatDTO {
@@ -291,7 +379,20 @@ export interface SurveyResultsDTO {
 
 export type SurveyPageDTO = PaginatedResultDTO<SurveyDTO>
 export type SurveyTrashPageDTO = PaginatedResultDTO<SurveyDTO>
-export type AnswerPageDTO = PaginatedResultDTO<AnswerDTO>
+
+export const QUESTION_DTO_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_OPTION_DTO_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_VALIDATION_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_UPLOAD_CONFIG_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_MATRIX_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_MATRIX_ROW_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_LOGIC_CONDITION_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_LOGIC_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_EXAM_CONFIG_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_JUMP_LOGIC_WRITABLE_FIELDS: readonly string[]
+export const QUESTION_OPTION_GROUP_WRITABLE_FIELDS: readonly string[]
+export const SURVEY_SETTINGS_WRITABLE_FIELDS: readonly string[]
+export const SURVEY_STYLE_WRITABLE_FIELDS: readonly string[]
 
 export const SURVEY_STATUS: Readonly<{
   DRAFT: 'draft'
@@ -307,12 +408,6 @@ export const SURVEY_ERROR_CODES: Readonly<{
   SURVEY_EXPIRED: 'SURVEY_EXPIRED'
   NOT_IN_TRASH: 'NOT_IN_TRASH'
   FOLDER_NOT_FOUND: 'FOLDER_NOT_FOUND'
-  UPLOAD_QUESTION_NOT_FOUND: 'UPLOAD_QUESTION_NOT_FOUND'
-  UPLOAD_SESSION_REQUIRED: 'UPLOAD_SESSION_REQUIRED'
-  UPLOAD_NOT_ENABLED: 'UPLOAD_NOT_ENABLED'
-  UPLOAD_VALIDATION: 'UPLOAD_VALIDATION'
-  DUPLICATE_SUBMISSION: 'DUPLICATE_SUBMISSION'
-  NO_FILE: 'NO_FILE'
   SHARE_CODE_GENERATION_FAILED: 'SHARE_CODE_GENERATION_FAILED'
 }>
 
@@ -340,34 +435,13 @@ export function normalizeSurveyTrashListQuery(query?: SurveyTrashListQueryDTO): 
   creator_id?: number | string
   createdBy?: string
 }
-export function normalizeAnswerListQuery(query?: AnswerListQueryDTO): {
-  page: number
-  pageSize: number
-  survey_id?: number
-  startTime?: string
-  endTime?: string
-}
+export function sanitizeWritableQuestionDto(question?: Partial<QuestionDTO> | Record<string, unknown> | null): Partial<QuestionDTO>
+export function sanitizeWritableQuestionDtos(questions?: Array<Partial<QuestionDTO> | Record<string, unknown> | null> | null): Partial<QuestionDTO>[]
+export function sanitizeWritableSurveySettings(settings?: Partial<SurveySettingsDTO> | Record<string, unknown> | null): Partial<SurveySettingsDTO> | undefined
+export function sanitizeWritableSurveyStyle(style?: Partial<SurveyStyleDTO> | Record<string, unknown> | null): Partial<SurveyStyleDTO> | undefined
 export function createSurveyPageResult<T>(input?: {
   list?: T[] | readonly T[] | null
   total?: number | string | null
   page?: number | string | null
   pageSize?: number | string | null
 }): PaginatedResultDTO<T>
-export function createAnswerDto(answer?: Partial<AnswerDTO> | null): AnswerDTO | null
-export function createAnswerPageResult<T extends Partial<AnswerDTO>>(input?: {
-  list?: T[] | readonly T[] | null
-  total?: number | string | null
-  page?: number | string | null
-  pageSize?: number | string | null
-}): AnswerPageDTO
-export function createSurveyUploadDto(file: {
-  id?: number | string | null
-  name?: string | null
-  url?: string | null
-  size?: number | string | null
-  type?: string | null
-  survey_id?: number | string | null
-  public_token?: string | null
-  uploadToken?: string | null
-}, surveyId?: number | string | null): UploadedSurveyFileDTO
-export function createSurveySubmissionDto(answer?: { id?: number | string | null }): SurveySubmitResultDTO

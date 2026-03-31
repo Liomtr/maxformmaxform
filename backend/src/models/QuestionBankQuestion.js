@@ -6,12 +6,25 @@ function getDb(options = {}) {
   return options.db || knex
 }
 
+function parseJsonField(value, fallback = null) {
+  if (value == null) return fallback
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value)
+    } catch {
+      return fallback
+    }
+  }
+  return value
+}
+
 function toDto(row) {
   if (!row) return null
   return {
     ...row,
     repoId: row.repo_id,
     score: row.score == null ? null : Number(row.score),
+    content: parseJsonField(row.content, null),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
@@ -34,7 +47,7 @@ const QuestionBankQuestion = {
     return rows.map(toDto)
   },
 
-  async create({ repo_id, title, type = null, difficulty = null, score = null }, options = {}) {
+  async create({ repo_id, title, type = null, difficulty = null, score = null, content = null }, options = {}) {
     const db = getDb(options)
     const [id] = await db(TABLE).insert({
       repo_id,
@@ -42,6 +55,7 @@ const QuestionBankQuestion = {
       type,
       difficulty,
       score,
+      content: content ? JSON.stringify(content) : null,
       updated_at: db.fn.now()
     })
     return QuestionBankQuestion.findById(id, repo_id, options)

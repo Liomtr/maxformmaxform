@@ -1,15 +1,12 @@
 ﻿import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import AuditLog from '../src/models/AuditLog.js'
-import Message from '../src/models/Message.js'
-import Survey from '../src/models/Survey.js'
-import Folder from '../src/models/Folder.js'
-import Answer from '../src/models/Answer.js'
-import FileModel from '../src/models/File.js'
-import SurveyResultsSnapshot from '../src/models/SurveyResultsSnapshot.js'
+import answerRepository from '../src/repositories/answerRepository.js'
+import fileRepository from '../src/repositories/fileRepository.js'
+import surveyRepository from '../src/repositories/surveyRepository.js'
+import surveyResultsSnapshotRepository from '../src/repositories/surveyResultsSnapshotRepository.js'
 import { registerApiRouteHarness, UPLOAD_DIR } from './helpers/apiRouteHarness.js'
-const { request, requestRaw, requestPublic } = registerApiRouteHarness()
+const { request, requestRaw } = registerApiRouteHarness()
 
 test('GET /api/surveys/:id/results returns question level statistics', async () => {
   const now = new Date()
@@ -22,7 +19,7 @@ test('GET /api/surveys/:id/results returns question level statistics', async () 
     return `${year}-${month}-${day}`
   }
 
-  Survey.findByIdentifier = async () => ({
+  surveyRepository.findByIdentifier = async () => ({
     id: 51,
     creator_id: 1,
     title: 'Analytics Survey',
@@ -67,13 +64,13 @@ test('GET /api/surveys/:id/results returns question level statistics', async () 
       { type: 'date', title: 'Date' }
     ]
   })
-  Answer.getAggregateState = async () => ({
+  answerRepository.getAggregateState = async () => ({
     answerCount: 2,
     latestAnswerId: 2,
     latestSubmittedAt: now.toISOString()
   })
 
-  Answer.findBySurveyId = async () => ([
+  answerRepository.listBySurveyId = async () => ([
     {
       id: 1,
       status: 'completed',
@@ -236,7 +233,7 @@ test('GET /api/surveys/:id/results returns question level statistics', async () 
 })
 
 test('GET /api/surveys/:id/results exposes large-sample baseline metrics on snapshot hits', async () => {
-  Survey.findByIdentifier = async () => ({
+  surveyRepository.findByIdentifier = async () => ({
     id: 53,
     creator_id: 1,
     title: 'Large Sample Survey',
@@ -247,12 +244,12 @@ test('GET /api/surveys/:id/results exposes large-sample baseline metrics on snap
       title: `Question ${index + 1}`
     }))
   })
-  Answer.getAggregateState = async () => ({
+  answerRepository.getAggregateState = async () => ({
     answerCount: 1200,
     latestAnswerId: 1200,
     latestSubmittedAt: '2026-03-28T12:00:00.000Z'
   })
-  SurveyResultsSnapshot.findBySurveyId = async () => ({
+  surveyResultsSnapshotRepository.findBySurveyId = async () => ({
     payload: {
       totalSubmissions: 1200,
       total: 1200,
@@ -295,8 +292,8 @@ test('GET /api/surveys/:id/results exposes large-sample baseline metrics on snap
     createdAt: '2026-03-28T12:01:00.000Z',
     updatedAt: '2026-03-28T12:02:00.000Z'
   })
-  Answer.findBySurveyId = async () => {
-    throw new Error('findBySurveyId should not be called on snapshot hit')
+  answerRepository.listBySurveyId = async () => {
+    throw new Error('listBySurveyId should not be called on snapshot hit')
   }
 
   const { response, json } = await request('/surveys/53/results')
@@ -320,14 +317,14 @@ test('GET /api/surveys/:id/results exposes large-sample baseline metrics on snap
 })
 
 test('GET /api/surveys/:id/results aggregates available region data', async () => {
-  Survey.findByIdentifier = async () => ({
+  surveyRepository.findByIdentifier = async () => ({
     id: 52,
     creator_id: 1,
     title: 'Region Survey',
     questions: []
   })
 
-  Answer.findBySurveyId = async () => ([
+  answerRepository.listBySurveyId = async () => ([
     {
       id: 11,
       province: 'Guangdong',
@@ -372,12 +369,12 @@ test('POST /api/answers/download/attachments streams a zip for managed survey fi
   const fixturePath = `${UPLOAD_DIR}/${fixtureName}`
   fs.writeFileSync(fixturePath, 'attachment fixture')
 
-  Survey.findById = async () => ({
+  surveyRepository.findByIdentifier = async () => ({
     id: 61,
     creator_id: 1,
     title: 'Attachment Survey'
   })
-  FileModel.listAnswerFilesBySurveyId = async () => ([
+  fileRepository.listAnswerFilesBySurveyId = async () => ([
     {
       id: 7001,
       answer_id: 88,
@@ -404,12 +401,12 @@ test('POST /api/answers/download/attachments streams a zip for managed survey fi
 })
 
 test('POST /api/answers/download/survey streams an xlsx for managed survey answers', async () => {
-  Survey.findById = async () => ({
+  surveyRepository.findByIdentifier = async () => ({
     id: 62,
     creator_id: 1,
     title: 'Workbook Survey'
   })
-  Answer.findBySurveyId = async () => ([
+  answerRepository.listBySurveyId = async () => ([
     {
       id: 701,
       submitted_at: '2026-03-28T12:00:00.000Z',
@@ -433,6 +430,18 @@ test('POST /api/answers/download/survey streams an xlsx for managed survey answe
   assert.match(response.headers.get('content-disposition') || '', /survey-62\.xlsx/)
   assert.ok(buffer.length > 20)
   assert.equal(buffer.subarray(0, 2).toString('hex'), '504b')
+})
+
+test('POST /api/answers/download/survey rejects invalid survey_id payload structures', async () => {
+  const { response, json } = await request('/answers/download/survey', {
+    method: 'POST',
+    body: { survey_id: { id: 62 } }
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /survey_id must be an integer/i)
 })
 
 

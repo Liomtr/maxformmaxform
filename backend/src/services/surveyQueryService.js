@@ -1,53 +1,44 @@
-import Survey from '../models/Survey.js'
-import User from '../models/User.js'
-import { isAdmin } from '../policies/accessPolicy.js'
+import surveyRepository from '../repositories/surveyRepository.js'
+import { resolveRequestedSurveyCreatorId } from './surveyAccessService.js'
 import {
-  getManageSurveyPolicy,
-  getPublicSurveyPolicy,
-  getSurveyAccessMeta,
-  isSurveyExpired
-} from '../policies/surveyPolicy.js'
-import { getSurveyResults } from './surveyResultsService.js'
+  ensureQueryObject,
+  normalizeOptionalIntegerQuery,
+  normalizeOptionalStringQuery,
+  normalizeStrictPagination
+} from '../utils/queryValidation.js'
 import {
   createSurveyPageResult,
-  normalizeSurveyListQuery,
-  normalizeSurveyTrashListQuery,
   SURVEY_ERROR_CODES,
-  SURVEY_STATUS
+  SURVEY_STATUS,
+  normalizeSurveyListQuery,
+  normalizeSurveyTrashListQuery
 } from '../../../shared/survey.contract.js'
 
-function createHttpError(status, code, message) {
-  return Object.assign(new Error(message), { status, code })
+function throwSurveyValidation(message) {
+  throw Object.assign(new Error(message), { status: 400, code: SURVEY_ERROR_CODES.VALIDATION })
 }
 
-function createResponseError(status, body) {
-  const error = Object.assign(new Error(body?.error?.message || 'Request failed'), {
-    status,
-    body
-  })
-  if (body?.error?.code) error.code = body.error.code
-  return error
-}
-
-function throwPolicyError(policy) {
-  if (policy.allowed) return
-  throw createResponseError(policy.status, policy.body)
-}
-
-export async function resolveRequestedSurveyCreatorId({ actor, query = {} }) {
-  const { creator_id, createdBy } = query
-  if (!isAdmin(actor)) return actor.sub
-  if (creator_id !== undefined) return Number(creator_id)
-  if (createdBy) {
-    const user = await User.findByUsername(String(createdBy))
-    return user ? user.id : -1
-  }
-  return undefined
-}
+const SURVEY_STATUS_SET = new Set(Object.values(SURVEY_STATUS))
 
 export async function listSurveys({ actor, query = {} }) {
-  const normalized = normalizeSurveyListQuery(query)
-  const result = await Survey.list({
+  ensureQueryObject(query, throwSurveyValidation)
+  const pagination = normalizeStrictPagination(query, { page: 1, pageSize: 20 }, throwSurveyValidation)
+  const status = normalizeOptionalStringQuery(query.status, 'status', throwSurveyValidation)
+  if (status !== undefined && !SURVEY_STATUS_SET.has(status)) {
+    throwSurveyValidation('status is invalid')
+  }
+
+  const normalized = normalizeSurveyListQuery({
+    ...query,
+    ...pagination,
+    status,
+    creator_id: normalizeOptionalIntegerQuery(query.creator_id, 'creator_id', throwSurveyValidation, { positive: true }),
+    createdBy: normalizeOptionalStringQuery(query.createdBy, 'createdBy', throwSurveyValidation),
+    folder_id: Object.prototype.hasOwnProperty.call(query, 'folder_id')
+      ? normalizeOptionalIntegerQuery(query.folder_id, 'folder_id', throwSurveyValidation, { allowNull: true, positive: true })
+      : undefined
+  })
+  const result = await surveyRepository.list({
     page: normalized.page,
     pageSize: normalized.pageSize,
     status: normalized.status,
@@ -67,8 +58,15 @@ export async function listManagedSurveys({ actor, query = {} }) {
 }
 
 export async function listSurveyTrash({ actor, query = {} }) {
-  const normalized = normalizeSurveyTrashListQuery(query)
-  const result = await Survey.listTrash({
+  ensureQueryObject(query, throwSurveyValidation)
+  const pagination = normalizeStrictPagination(query, { page: 1, pageSize: 100 }, throwSurveyValidation)
+  const normalized = normalizeSurveyTrashListQuery({
+    ...query,
+    ...pagination,
+    creator_id: normalizeOptionalIntegerQuery(query.creator_id, 'creator_id', throwSurveyValidation, { positive: true }),
+    createdBy: normalizeOptionalStringQuery(query.createdBy, 'createdBy', throwSurveyValidation)
+  })
+  const result = await surveyRepository.listTrash({
     page: normalized.page,
     pageSize: normalized.pageSize,
     creator_id: await resolveRequestedSurveyCreatorId({ actor, query })
@@ -83,69 +81,4 @@ export async function listSurveyTrash({ actor, query = {} }) {
 
 export async function listManagedSurveyTrash({ actor, query = {} }) {
   return listSurveyTrash({ actor, query })
-}
-
-export async function getSurveyOrThrow(identifier, options = {}) {
-  const survey = await Survey.findByIdentifier(identifier, options)
-  if (!survey) {
-    throw createHttpError(404, SURVEY_ERROR_CODES.NOT_FOUND, 'Survey not found')
-  }
-  return survey
-}
-
-export async function getSharedSurveyOrThrow(shareCode, options = {}) {
-  const survey = await Survey.findByShareCode(shareCode, options)
-  if (!survey) {
-    throw createHttpError(404, SURVEY_ERROR_CODES.NOT_FOUND, 'Survey not found')
-  }
-  return survey
-}
-
-export async function getSurveyForManagement({ actor, identifier, includeDeleted = false }) {
-  const survey = await getSurveyOrThrow(identifier, { includeDeleted })
-  throwPolicyError(getManageSurveyPolicy(actor, survey))
-  return survey
-}
-
-export async function getSurveyForPublicView({ actor, identifier }) {
-  const survey = await getSurveyOrThrow(identifier)
-  throwPolicyError(getPublicSurveyPolicy(actor, survey))
-  return survey
-}
-
-export async function getPublicSurveyView({ actor, identifier }) {
-  return getSurveyForPublicView({ actor, identifier })
-}
-
-export async function getSharedSurveyForPublicView({ actor, shareCode }) {
-  const survey = await getSharedSurveyOrThrow(shareCode)
-  throwPolicyError(getPublicSurveyPolicy(actor, survey))
-  return survey
-}
-
-export async function getSharedSurveyView({ actor, shareCode }) {
-  return getSharedSurveyForPublicView({ actor, shareCode })
-}
-
-export async function getSurveyForSubmission(identifier) {
-  const survey = await getSurveyOrThrow(identifier)
-  if (survey.status !== SURVEY_STATUS.PUBLISHED) {
-    throw createResponseError(400, {
-      success: false,
-      error: { code: SURVEY_ERROR_CODES.NOT_PUBLISHED, message: 'Survey is not published' }
-    })
-  }
-  if (isSurveyExpired(survey)) {
-    throw createResponseError(403, {
-      success: false,
-      error: { code: SURVEY_ERROR_CODES.SURVEY_EXPIRED, message: 'Survey has expired' },
-      data: getSurveyAccessMeta(survey)
-    })
-  }
-  return survey
-}
-
-export async function getManagedSurveyResults({ actor, identifier }) {
-  const survey = await getSurveyForManagement({ actor, identifier })
-  return getSurveyResults({ survey })
 }

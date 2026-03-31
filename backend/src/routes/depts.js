@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { asyncRoute } from '../http/asyncRoute.js'
+import { throwManagementError } from '../http/managementErrors.js'
 import { authRequired } from '../middlewares/auth.js'
 import {
   createManagedDept,
@@ -8,6 +9,8 @@ import {
   listManagedDepts,
   updateManagedDept
 } from '../services/deptService.js'
+import { normalizeRequiredIntegerParam } from '../utils/routeParams.js'
+import { MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
 const router = Router()
 
@@ -29,12 +32,18 @@ router.post('/', asyncRoute(async (req, res) => {
 }))
 
 router.put('/:id', asyncRoute(async (req, res) => {
-  const dept = await updateManagedDept({ actor: req.user, deptId: req.params.id, body: req.body })
+  const deptId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  const dept = await updateManagedDept({ actor: req.user, deptId, body: req.body })
   res.json({ success: true, data: dept })
 }))
 
 router.delete('/:id', asyncRoute(async (req, res) => {
-  const result = await deleteManagedDept({ actor: req.user, deptId: req.params.id })
+  const deptId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  const result = await deleteManagedDept({ actor: req.user, deptId })
   res.json({ success: true, data: result })
 }))
 

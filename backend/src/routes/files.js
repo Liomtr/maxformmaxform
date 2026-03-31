@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { asyncRoute } from '../http/asyncRoute.js'
+import { throwManagementError } from '../http/managementErrors.js'
 import { authRequired } from '../middlewares/auth.js'
 import {
   deleteManagedFile,
@@ -7,7 +8,9 @@ import {
   uploadManagedImage
 } from '../services/fileCommandService.js'
 import { listManagedFiles } from '../services/fileQueryService.js'
+import { normalizeRequiredIntegerParam } from '../utils/routeParams.js'
 import { upload } from '../utils/uploadStorage.js'
+import { MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
 const router = Router()
 
@@ -27,7 +30,10 @@ router.post('/upload/image', authRequired, upload.single('file'), asyncRoute(asy
 }))
 
 router.delete('/:id', authRequired, asyncRoute(async (req, res) => {
-  await deleteManagedFile({ actor: req.user, fileId: req.params.id })
+  const fileId = normalizeRequiredIntegerParam(req.params.id, 'id', message => {
+    throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+  })
+  await deleteManagedFile({ actor: req.user, fileId })
   res.json({ success: true })
 }))
 

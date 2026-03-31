@@ -20,8 +20,28 @@ const answerRepository = {
     return Number(count || 0)
   },
 
+  async getAggregateState(surveyId, options = {}) {
+    return AnswerModel.getAggregateState(surveyId, options)
+  },
+
   async listBySurveyId(surveyId, options = {}) {
     return AnswerModel.findBySurveyId(surveyId, options)
+  },
+
+  async create(payload, options = {}) {
+    return AnswerModel.create(payload, options)
+  },
+
+  async countByIp(surveyId, ipAddress, options = {}) {
+    return AnswerModel.countByIp(surveyId, ipAddress, options)
+  },
+
+  async deleteBatch(ids = [], options = {}) {
+    return AnswerModel.deleteBatch(ids, options)
+  },
+
+  async deleteBySurveyIds(surveyIds = [], options = {}) {
+    return AnswerModel.deleteBySurveyIds(surveyIds, options)
   }
 }
 

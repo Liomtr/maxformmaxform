@@ -57,6 +57,52 @@ async function createSurvey(request: import('playwright/test').APIRequestContext
   return body.data
 }
 
+async function loginUser(request: import('playwright/test').APIRequestContext, username: string, password: string) {
+  const response = await request.post(`${backendBaseUrl}/api/auth/login`, {
+    data: { username, password }
+  })
+  expect(response.ok()).toBeTruthy()
+
+  const body = await response.json()
+  return {
+    username,
+    token: body.data.token
+  }
+}
+
+async function createRepo(
+  request: import('playwright/test').APIRequestContext,
+  token: string,
+  payload: { name: string; description?: string }
+) {
+  const response = await request.post(`${backendBaseUrl}/api/repos`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    data: payload
+  })
+  expect(response.ok()).toBeTruthy()
+  const body = await response.json()
+  return body.data
+}
+
+async function createBankQuestion(
+  request: import('playwright/test').APIRequestContext,
+  token: string,
+  repoId: number,
+  payload: Record<string, unknown>
+) {
+  const response = await request.post(`${backendBaseUrl}/api/repos/${repoId}/questions`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    data: payload
+  })
+  expect(response.ok()).toBeTruthy()
+  const body = await response.json()
+  return body.data
+}
+
 async function publishSurvey(request: import('playwright/test').APIRequestContext, token: string, surveyId: number) {
   const response = await request.post(`${backendBaseUrl}/api/surveys/${surveyId}/publish`, {
     headers: {
@@ -113,6 +159,132 @@ test.describe('Survey Browser E2E', () => {
     expect(surveyResponse.ok()).toBeTruthy()
     const surveyBody = await surveyResponse.json()
     expect(surveyBody.data.status).toBe('published')
+  })
+
+  test('editor can import a structured question bank question into the survey editor', async ({ page, request }) => {
+    const admin = await loginUser(request, 'admin', '123456')
+    const user = await createUser(request)
+    const repo = await createRepo(request, admin.token, {
+      name: `Repo Import ${Date.now()}`
+    })
+    const bankQuestion = await createBankQuestion(request, admin.token, repo.id, {
+      title: '登录频率题',
+      type: 'radio',
+      stem: '请选择最符合你当前登录频率的一项。',
+      options: ['每天', '每周'],
+      analysis: '用于判断用户活跃频率。'
+    })
+
+    page.on('dialog', async dialog => {
+      await dialog.accept()
+    })
+
+    const survey = await createSurvey(request, user.token, {
+      title: 'Repo Import Survey',
+      description: 'Question bank import test.',
+      questions: [
+        {
+          type: 'input',
+          title: 'Existing question'
+        }
+      ],
+      settings: {
+        allowMultipleSubmissions: true
+      }
+    })
+
+    await withAuth(page, user.token)
+    await page.goto(`/surveys/${survey.id}/edit`)
+    await page.waitForURL(new RegExp(`/surveys/${survey.id}/edit(\\?|$)`))
+
+    await page.getByTestId('survey-panel-tab-repo').click()
+    await expect(page.getByTestId('survey-question-bank-panel')).toBeVisible()
+    await page.getByTestId('survey-bank-repo-select').selectOption(String(repo.id))
+    await page.getByTestId(`survey-bank-import-button-${bankQuestion.id}`).click()
+
+    await expect(page.getByTestId('question-editor-1')).toBeVisible()
+    await expect(page.getByTestId('question-title-input-1')).toHaveValue('请选择最符合你当前登录频率的一项。')
+    await expect(page.locator('[data-opt="q1-o0"]')).toHaveValue('每天')
+    await expect(page.locator('[data-opt="q1-o1"]')).toHaveValue('每周')
+
+    await page.getByTestId('editor-publish-button').click()
+    await page.waitForURL('**/user-dashboard')
+
+    const surveyResponse = await request.get(`${backendBaseUrl}/api/surveys/${survey.id}`, {
+      headers: {
+        Authorization: `Bearer ${user.token}`
+      }
+    })
+    expect(surveyResponse.ok()).toBeTruthy()
+    const surveyBody = await surveyResponse.json()
+    expect(surveyBody.data.questions[1].title).toBe('请选择最符合你当前登录频率的一项。')
+    expect(surveyBody.data.questions[1].description).toBe('用于判断用户活跃频率。')
+    expect(surveyBody.data.questions[1].options.map((item: { label: string }) => item.label)).toEqual(['每天', '每周'])
+  })
+
+  test('editor can save the current survey question back into a question bank repo', async ({ page, request }) => {
+    const admin = await loginUser(request, 'admin', '123456')
+    const repo = await createRepo(request, admin.token, {
+      name: `Repo Export ${Date.now()}`
+    })
+    const survey = await createSurvey(request, admin.token, {
+      title: 'Repo Export Survey',
+      description: 'Question bank export test.',
+      questions: [
+        {
+          type: 'radio',
+          title: '你通常通过什么渠道了解活动信息？',
+          description: '用于识别活动传播渠道。',
+          options: [
+            { label: '微信群', value: '1' },
+            { label: '邮件通知', value: '2' }
+          ]
+        }
+      ],
+      settings: {
+        allowMultipleSubmissions: true
+      }
+    })
+
+    await withAuth(page, admin.token)
+    await page.goto(`/surveys/${survey.id}/edit`)
+    await page.waitForURL(new RegExp(`/surveys/${survey.id}/edit(\\?|$)`))
+
+    await page.getByTestId('question-editor-0').locator('.question-content').click()
+    await page.getByTestId('survey-panel-tab-repo').click()
+    await page.getByTestId('survey-bank-repo-select').selectOption(String(repo.id))
+    await expect(page.getByTestId('survey-bank-save-current-button')).toBeVisible()
+    await page.getByTestId('survey-bank-export-tags-input').fill('渠道, 触达')
+    await page.getByTestId('survey-bank-export-knowledge-input').fill('用户研究, 传播分析')
+    await page.getByTestId('survey-bank-export-scenes-input').fill('活动报名, 市场调研')
+    await page.getByTestId('survey-bank-export-ai-meta-input').fill('{"generatedBy":"gpt-5.2","reviewStatus":"draft"}')
+    await page.getByTestId('survey-bank-save-current-button').click()
+
+    let repoQuestionsBody: any = null
+    await expect.poll(async () => {
+      const repoQuestionsResponse = await request.get(`${backendBaseUrl}/api/repos/${repo.id}/questions`, {
+        headers: {
+          Authorization: `Bearer ${admin.token}`
+        }
+      })
+      expect(repoQuestionsResponse.ok()).toBeTruthy()
+      repoQuestionsBody = await repoQuestionsResponse.json()
+      return repoQuestionsBody.data.length
+    }).toBe(1)
+
+    expect(repoQuestionsBody.data[0].title).toBe('你通常通过什么渠道了解活动信息？')
+    expect(repoQuestionsBody.data[0].analysis).toBe('用于识别活动传播渠道。')
+    expect(repoQuestionsBody.data[0].options.map((item: { label: string }) => item.label)).toEqual(['微信群', '邮件通知'])
+    expect(repoQuestionsBody.data[0].tags).toEqual(['渠道', '触达'])
+    expect(repoQuestionsBody.data[0].knowledgePoints).toEqual(['用户研究', '传播分析'])
+    expect(repoQuestionsBody.data[0].applicableScenes).toEqual(['活动报名', '市场调研'])
+    expect(repoQuestionsBody.data[0].content?.surveyQuestion?.type).toBe('radio')
+    expect(repoQuestionsBody.data[0].content?.surveyQuestion?.logic).toBeUndefined()
+    expect(repoQuestionsBody.data[0].content?.surveyQuestion?.jumpLogic).toBeUndefined()
+    expect(repoQuestionsBody.data[0].content?.aiMeta).toEqual({
+      generatedBy: 'gpt-5.2',
+      reviewStatus: 'draft'
+    })
   })
 
   test('public fill page can submit a published survey', async ({ page, request }) => {

@@ -1,6 +1,13 @@
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { SurveyEditorForm, SurveyEditorQuestion } from './editor-core'
+import type { QuestionQuotaModeDTO } from '../../../../shared/survey.contract.js'
+
+interface EditorQuotaRow {
+  label: string
+  quotaLimit: number
+  quotaEnabled: boolean
+}
 
 interface EditorQuotaOptions {
   surveyForm: SurveyEditorForm
@@ -13,8 +20,8 @@ export function useEditorQuota(options: EditorQuotaOptions) {
   const quotaTargetIndex = ref<number | null>(null)
   const quotaEnabled = ref(false)
   const quotaActiveTab = ref<'count' | 'tips'>('count')
-  const quotaRows = ref<Array<{ label: any; quotaLimit: number; quotaEnabled: boolean }>>([])
-  const quotaMode = ref<'explicit' | 'implicit'>('explicit')
+  const quotaRows = ref<EditorQuotaRow[]>([])
+  const quotaMode = ref<QuestionQuotaModeDTO>('explicit')
   const quotaFullText = ref('名额已满')
   const quotaShowRemaining = ref(false)
 
@@ -29,11 +36,11 @@ export function useEditorQuota(options: EditorQuotaOptions) {
 
   function openQuotaDialog(index: number) {
     quotaTargetIndex.value = index
-    const question: any = surveyForm.questions[index]
+    const question = surveyForm.questions[index]
     const options = Array.isArray(question.options) ? question.options : []
     const extras = Array.isArray(question.optionExtras) ? question.optionExtras : []
-    quotaRows.value = options.map((label: any, optionIndex: number) => ({
-      label,
+    quotaRows.value = options.map((label, optionIndex: number) => ({
+      label: String(label),
       quotaLimit: Number(extras[optionIndex]?.quotaLimit || 0),
       quotaEnabled: extras[optionIndex]?.quotaEnabled !== false
     }))
@@ -78,16 +85,29 @@ export function useEditorQuota(options: EditorQuotaOptions) {
 
   function saveQuotaDialog() {
     if (quotaTargetIndex.value == null) return
-    const question: any = surveyForm.questions[quotaTargetIndex.value]
+    const question = surveyForm.questions[quotaTargetIndex.value]
     question.optionExtras = Array.isArray(question.optionExtras) ? question.optionExtras : []
+    const optionExtras = question.optionExtras
     question.quotasEnabled = quotaRows.value.some(row => Number(row.quotaLimit || 0) > 0)
     question.quotaMode = quotaMode.value
     question.quotaFullText = quotaFullText.value
     question.quotaShowRemaining = !!quotaShowRemaining.value
     quotaRows.value.forEach((row, index) => {
-      question.optionExtras[index] = question.optionExtras[index] || {}
-      question.optionExtras[index].quotaLimit = Number(row.quotaLimit || 0)
-      question.optionExtras[index].quotaEnabled = !!row.quotaEnabled
+      optionExtras[index] = optionExtras[index] || {
+        quotaLimit: 0,
+        quotaEnabled: true,
+        rich: false,
+        hasDesc: false,
+        desc: '',
+        exclusive: false,
+        defaultSelected: false,
+        hidden: false,
+        fillEnabled: false,
+        fillRequired: false,
+        fillPlaceholder: ''
+      }
+      optionExtras[index].quotaLimit = Number(row.quotaLimit || 0)
+      optionExtras[index].quotaEnabled = !!row.quotaEnabled
     })
     showQuotaDialog.value = false
   }
@@ -97,7 +117,8 @@ export function useEditorQuota(options: EditorQuotaOptions) {
       const extras = Array.isArray(question.optionExtras) ? question.optionExtras : []
       const limit = Number(extras?.[optionIndex]?.quotaLimit || 0)
       if (!question?.quotasEnabled || !Number.isFinite(limit) || limit <= 0) return null
-      const used = Number((question.options?.[optionIndex] as any)?.quotaUsed || 0)
+      const option = question.options?.[optionIndex] as string | { quotaUsed?: number } | undefined
+      const used = typeof option === 'object' && option ? Number(option.quotaUsed || 0) : 0
       return Math.max(0, limit - used)
     } catch {
       return null
@@ -106,11 +127,11 @@ export function useEditorQuota(options: EditorQuotaOptions) {
 
   function isQuotaConfigured(question: SurveyEditorQuestion): boolean {
     if (!question || !question.quotasEnabled) return false
-    const options: any[] = Array.isArray(question.options) ? question.options : []
+    const options = Array.isArray(question.options) ? question.options : []
     for (let index = 0; index < options.length; index += 1) {
       const extra = Array.isArray(question.optionExtras) ? question.optionExtras[index] : undefined
-      const limit = extra && typeof extra.quotaLimit === 'number' ? extra.quotaLimit : typeof options[index]?.quotaLimit === 'number' ? options[index].quotaLimit : 0
-      const enabled = extra && typeof extra.quotaEnabled === 'boolean' ? extra.quotaEnabled : typeof options[index]?.quotaEnabled === 'boolean' ? options[index].quotaEnabled : true
+      const limit = extra && typeof extra.quotaLimit === 'number' ? extra.quotaLimit : 0
+      const enabled = extra && typeof extra.quotaEnabled === 'boolean' ? extra.quotaEnabled : true
       if (enabled && Number(limit) > 0) return true
     }
     return false

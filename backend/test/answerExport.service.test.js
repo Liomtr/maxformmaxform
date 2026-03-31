@@ -12,6 +12,7 @@ import {
   createSurveyAnswersWorkbookExport
 } from '../src/services/answerExportService.js'
 import { UPLOAD_DIR } from '../src/utils/uploadStorage.js'
+import { ANSWER_ERROR_CODES } from '../../shared/answer.contract.js'
 
 const originalAnswerListBySurveyId = answerRepository.listBySurveyId
 const originalFileListAnswerFilesBySurveyId = fileRepository.listAnswerFilesBySurveyId
@@ -75,6 +76,18 @@ test('createSurveyAnswersWorkbookExport resolves the managed survey when surveyI
   assert.ok(result.buffer.byteLength > 0)
 })
 
+test('createSurveyAnswersWorkbookExport rejects invalid survey id structures', async () => {
+  await assert.rejects(
+    () => createSurveyAnswersWorkbookExport({
+      actor: { sub: 1, roleCode: 'user' },
+      surveyId: { id: 56 }
+    }),
+    error => error?.status === 400
+      && error?.body?.error?.code === ANSWER_ERROR_CODES.VALIDATION
+      && /survey_id must be an integer/i.test(error?.body?.error?.message || '')
+  )
+})
+
 test('createSurveyAnswerAttachmentsArchive rejects when no stored files exist on disk', async () => {
   fileRepository.listAnswerFilesBySurveyId = async () => ([
     {
@@ -88,7 +101,7 @@ test('createSurveyAnswerAttachmentsArchive rejects when no stored files exist on
 
   await assert.rejects(
     () => createSurveyAnswerAttachmentsArchive({ survey: { id: 66 } }),
-    error => error?.status === 404 && error?.body?.error?.code === 'NO_FILE'
+    error => error?.status === 404 && error?.body?.error?.code === ANSWER_ERROR_CODES.NO_FILE
   )
 })
 

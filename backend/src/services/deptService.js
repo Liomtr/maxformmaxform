@@ -2,6 +2,12 @@ import { throwManagementError, throwManagementPolicyError } from '../http/manage
 import { getAdminPolicy } from '../policies/adminPolicy.js'
 import { getAuthenticatedActorPolicy } from '../policies/actorPolicy.js'
 import deptRepository from '../repositories/deptRepository.js'
+import {
+  ensurePlainObjectPayload,
+  normalizeOptionalId,
+  normalizeOptionalNumber,
+  normalizeRequiredTrimmedString
+} from '../utils/managementPayload.js'
 import { recordManagementAction, runManagementTransaction } from './activity.js'
 import { createDeptDto, MANAGEMENT_ERROR_CODES } from '../../../shared/management.contract.js'
 
@@ -27,17 +33,19 @@ export async function getManagedDeptTree({ actor }) {
 
 export async function createManagedDept({ actor, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
-    const name = String(body.name || '').trim()
-    if (!name) {
-      throwManagementError(400, MANAGEMENT_ERROR_CODES.DEPT_NAME_REQUIRED, 'Department name is required')
-    }
+    const name = normalizeRequiredTrimmedString(body.name, {
+      field: 'name',
+      code: MANAGEMENT_ERROR_CODES.DEPT_NAME_REQUIRED,
+      message: 'Department name is required'
+    })
 
     const dept = await deptRepository.create({
       name,
-      parent_id: body.parent_id,
-      sort_order: body.sort_order
+      parent_id: normalizeOptionalId(body.parent_id, { field: 'parent_id', allowNull: true }),
+      sort_order: normalizeOptionalNumber(body.sort_order, { field: 'sort_order', integer: true })
     }, { db })
 
     await recordManagementAction({
@@ -63,12 +71,19 @@ export async function createManagedDept({ actor, body = {} }) {
 
 export async function updateManagedDept({ actor, deptId, body = {} }) {
   ensureAdmin(actor)
+  body = ensurePlainObjectPayload(body)
 
   return runManagementTransaction(async db => {
     const dept = await deptRepository.update(deptId, {
-      name: body.name === undefined ? undefined : String(body.name).trim(),
-      parent_id: body.parent_id,
-      sort_order: body.sort_order
+      name: body.name === undefined
+        ? undefined
+        : normalizeRequiredTrimmedString(body.name, {
+            field: 'name',
+            code: MANAGEMENT_ERROR_CODES.DEPT_NAME_REQUIRED,
+            message: 'Department name is required'
+          }),
+      parent_id: normalizeOptionalId(body.parent_id, { field: 'parent_id', allowNull: true }),
+      sort_order: normalizeOptionalNumber(body.sort_order, { field: 'sort_order', integer: true })
     }, { db })
 
     if (!dept) {

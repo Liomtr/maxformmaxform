@@ -7,7 +7,11 @@ import {
   serverQuestionTypeHasOptions,
   SUPPORTED_SERVER_TYPES
 } from '../../../shared/questionTypeRegistry.js'
+import { sanitizeWritableQuestionDtos } from '../../../shared/survey.contract.js'
 const SUPPORTED_SERVER_TYPE_SET = new Set(SUPPORTED_SERVER_TYPES)
+const LOGIC_OP_SET = new Set(['eq', 'neq', 'in', 'nin', 'includes', 'notIncludes', 'gt', 'gte', 'lt', 'lte', 'regex', 'overlap'])
+const OPTION_ORDER_SET = new Set(['none', 'all', 'flip', 'firstFixed', 'lastFixed'])
+const QUOTA_MODE_SET = new Set(['explicit', 'implicit'])
 const DEFAULT_UPLOAD_ACCEPT = '.jpg,.jpeg,.png,.gif,.webp,.pdf,.docx,.xlsx'
 const DEFAULT_UPLOAD_MAX_FILES = 1
 const DEFAULT_UPLOAD_MAX_SIZE_MB = Math.max(1, Math.floor(config.upload.maxSize / (1024 * 1024)))
@@ -109,6 +113,251 @@ function normalizeAcceptToken(token) {
   return `.${normalized.replace(/^\.+/, '')}`
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isBooleanOrUndefined(value) {
+  return value === undefined || typeof value === 'boolean'
+}
+
+function isFiniteInteger(value) {
+  return Number.isInteger(Number(value)) && Number.isFinite(Number(value))
+}
+
+function validateVisibleWhenStructure(groups, context) {
+  const label = String(context.label || 'visibleWhen')
+  if (groups === undefined) return null
+  if (!Array.isArray(groups)) return `${label} must be an array of condition groups`
+
+  const currentOrder = context.questionIndex + 1
+  if (groups.length > 0 && currentOrder <= 1) {
+    return `${label} cannot reference previous questions because this is the first question`
+  }
+
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+    const group = groups[groupIndex]
+    if (!Array.isArray(group) || group.length === 0) {
+      return `${label} group ${groupIndex + 1} must contain at least one condition`
+    }
+
+    for (let conditionIndex = 0; conditionIndex < group.length; conditionIndex += 1) {
+      const condition = group[conditionIndex]
+      if (!isPlainObject(condition)) {
+        return `${label} group ${groupIndex + 1} condition ${conditionIndex + 1} must be an object`
+      }
+
+      const qid = Number(condition.qid)
+      if (!Number.isInteger(qid) || qid < 1 || qid >= currentOrder) {
+        return `${label} group ${groupIndex + 1} condition ${conditionIndex + 1} must reference a previous question`
+      }
+
+      const depQuestion = context.questions[qid - 1]
+      if (!depQuestion) {
+        return `${label} group ${groupIndex + 1} condition ${conditionIndex + 1} references a missing question`
+      }
+
+      const op = String(condition.op || '')
+      if (!LOGIC_OP_SET.has(op)) {
+        return `${label} group ${groupIndex + 1} condition ${conditionIndex + 1} uses an unsupported operator`
+      }
+
+      const { value } = condition
+      if ((op === 'in' || op === 'nin' || op === 'overlap') && !Array.isArray(value)) {
+        return `${label} group ${groupIndex + 1} condition ${conditionIndex + 1} requires an array value`
+      }
+      if (op === 'regex' && typeof value !== 'string') {
+        return `${label} group ${groupIndex + 1} condition ${conditionIndex + 1} requires a string regex`
+      }
+
+      const depOptions = Array.isArray(depQuestion.options) ? depQuestion.options : []
+      if (depOptions.length > 0) {
+        const optionValues = new Set(depOptions.map(option => String(option.value)))
+        const values = Array.isArray(value) ? value : [value]
+        const invalidOptionValue = values.some(item => !optionValues.has(String(item)))
+        if (invalidOptionValue) {
+          return `${label} group ${groupIndex + 1} condition ${conditionIndex + 1} contains an invalid option value`
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+function validateJumpTarget(target, context) {
+  const label = String(context.label || 'jump target')
+  const raw = String(target || '').trim()
+  if (!raw) return `${label} is required`
+  if (raw === 'end' || raw === 'invalid') return null
+  if (!/^\d+$/.test(raw)) return `${label} must be a later question, "end", or "invalid"`
+
+  const questionOrder = context.questionIndex + 1
+  const numeric = Number(raw)
+  if (numeric <= questionOrder) return `${label} must be later than the current question`
+  if (numeric > context.totalQuestions) return `${label} exceeds the total question count`
+  return null
+}
+
+function validateJumpLogic(question, questionIndex, totalQuestions) {
+  if (question.jumpLogic === undefined) return null
+  if (!isPlainObject(question.jumpLogic)) return `Question ${questionIndex + 1} jumpLogic must be an object`
+
+  const { byOption, unconditional } = question.jumpLogic
+  const hasByOption = byOption !== undefined
+  const hasUnconditional = unconditional !== undefined
+
+  if (!hasByOption && !hasUnconditional) {
+    return `Question ${questionIndex + 1} jumpLogic must define at least one target`
+  }
+
+  const context = { questionIndex, totalQuestions }
+  if (hasByOption) {
+    if (!isPlainObject(byOption)) return `Question ${questionIndex + 1} jumpLogic.byOption must be an object`
+    if (!(question.type === 'radio' || question.type === 'checkbox')) {
+      return `Question ${questionIndex + 1} jumpLogic.byOption is only supported for choice questions`
+    }
+
+    const optionValues = new Set((question.options || []).map(option => String(option.value)))
+    for (const [optionValue, target] of Object.entries(byOption)) {
+      if (!optionValues.has(String(optionValue))) {
+        return `Question ${questionIndex + 1} jumpLogic.byOption contains an invalid option`
+      }
+      const error = validateJumpTarget(target, {
+        ...context,
+        label: `jumpLogic.byOption[${optionValue}]`
+      })
+      if (error) return `Question ${questionIndex + 1} ${error}`
+    }
+  }
+
+  if (hasUnconditional) {
+    const error = validateJumpTarget(unconditional, {
+      ...context,
+      label: 'jumpLogic.unconditional'
+    })
+    if (error) return `Question ${questionIndex + 1} ${error}`
+  }
+
+  return null
+}
+
+function validateOptionGroups(question, questionIndex) {
+  if (question.optionGroups === undefined) return null
+  if (!Array.isArray(question.optionGroups)) return `Question ${questionIndex + 1} optionGroups must be an array`
+  if (!serverQuestionTypeHasOptions(question.type)) {
+    return `Question ${questionIndex + 1} optionGroups is only supported for option questions`
+  }
+
+  const optionCount = Array.isArray(question.options) ? question.options.length : 0
+  const occupied = new Set()
+
+  for (let groupIndex = 0; groupIndex < question.optionGroups.length; groupIndex += 1) {
+    const group = question.optionGroups[groupIndex]
+    if (!isPlainObject(group)) return `Question ${questionIndex + 1} optionGroups[${groupIndex + 1}] must be an object`
+
+    const from = Number(group.from)
+    const to = Number(group.to)
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from || to > optionCount) {
+      return `Question ${questionIndex + 1} optionGroups[${groupIndex + 1}] has an invalid range`
+    }
+
+    for (let optionIndex = from; optionIndex <= to; optionIndex += 1) {
+      if (occupied.has(optionIndex)) {
+        return `Question ${questionIndex + 1} optionGroups[${groupIndex + 1}] overlaps another group`
+      }
+      occupied.add(optionIndex)
+    }
+  }
+
+  return null
+}
+
+function validateQuestionOptionMetadata(question, questionIndex, questions) {
+  if (question.optionOrder !== undefined && !OPTION_ORDER_SET.has(String(question.optionOrder))) {
+    return `Question ${questionIndex + 1} optionOrder is invalid`
+  }
+  if (!isBooleanOrUndefined(question.hideSystemNumber)) {
+    return `Question ${questionIndex + 1} hideSystemNumber must be boolean`
+  }
+  if (!isBooleanOrUndefined(question.autoSelectOnAppear)) {
+    return `Question ${questionIndex + 1} autoSelectOnAppear must be boolean`
+  }
+  if (question.autoSelectOnAppear && !(question.type === 'radio' || question.type === 'checkbox')) {
+    return `Question ${questionIndex + 1} autoSelectOnAppear is only supported for choice questions`
+  }
+  if (!isBooleanOrUndefined(question.quotasEnabled)) {
+    return `Question ${questionIndex + 1} quotasEnabled must be boolean`
+  }
+  if (question.quotaMode !== undefined && !QUOTA_MODE_SET.has(String(question.quotaMode))) {
+    return `Question ${questionIndex + 1} quotaMode is invalid`
+  }
+  if (!isBooleanOrUndefined(question.quotaShowRemaining)) {
+    return `Question ${questionIndex + 1} quotaShowRemaining must be boolean`
+  }
+  if (question.quotaFullText !== undefined && typeof question.quotaFullText !== 'string') {
+    return `Question ${questionIndex + 1} quotaFullText must be a string`
+  }
+  if (question.quotasEnabled && !serverQuestionTypeHasOptions(question.type)) {
+    return `Question ${questionIndex + 1} quotas are only supported for option questions`
+  }
+
+  const logicError = validateVisibleWhenStructure(question?.logic?.visibleWhen, {
+    questionIndex,
+    questions,
+    label: `Question ${questionIndex + 1} logic.visibleWhen`
+  })
+  if (logicError) return logicError
+
+  const jumpError = validateJumpLogic(question, questionIndex, questions.length)
+  if (jumpError) return jumpError
+
+  const groupError = validateOptionGroups(question, questionIndex)
+  if (groupError) return groupError
+
+  const options = Array.isArray(question.options) ? question.options : []
+  for (let optionIndex = 0; optionIndex < options.length; optionIndex += 1) {
+    const option = options[optionIndex]
+    if (!isBooleanOrUndefined(option.hidden)) {
+      return `Question ${questionIndex + 1} option ${optionIndex + 1} hidden must be boolean`
+    }
+    if (!isBooleanOrUndefined(option.exclusive)) {
+      return `Question ${questionIndex + 1} option ${optionIndex + 1} exclusive must be boolean`
+    }
+    if (!isBooleanOrUndefined(option.defaultSelected)) {
+      return `Question ${questionIndex + 1} option ${optionIndex + 1} defaultSelected must be boolean`
+    }
+    if (!isBooleanOrUndefined(option.quotaEnabled)) {
+      return `Question ${questionIndex + 1} option ${optionIndex + 1} quotaEnabled must be boolean`
+    }
+    if (!isBooleanOrUndefined(option.fillEnabled)) {
+      return `Question ${questionIndex + 1} option ${optionIndex + 1} fillEnabled must be boolean`
+    }
+    if (!isBooleanOrUndefined(option.fillRequired)) {
+      return `Question ${questionIndex + 1} option ${optionIndex + 1} fillRequired must be boolean`
+    }
+    if (option.fillPlaceholder !== undefined && typeof option.fillPlaceholder !== 'string') {
+      return `Question ${questionIndex + 1} option ${optionIndex + 1} fillPlaceholder must be a string`
+    }
+
+    if (option.quotaLimit !== undefined) {
+      const quotaLimit = Number(option.quotaLimit)
+      if (!Number.isFinite(quotaLimit) || quotaLimit < 0) {
+        return `Question ${questionIndex + 1} option ${optionIndex + 1} quotaLimit must be a non-negative number`
+      }
+    }
+
+    const optionLogicError = validateVisibleWhenStructure(option.visibleWhen, {
+      questionIndex,
+      questions,
+      label: `Question ${questionIndex + 1} option ${optionIndex + 1} visibleWhen`
+    })
+    if (optionLogicError) return optionLogicError
+  }
+
+  return null
+}
+
 export function sanitizeUploadAccept(value) {
   const tokens = String(value || '')
     .split(',')
@@ -173,9 +422,9 @@ export function validateUploadFilesAgainstQuestion(question, files, options = {}
 }
 
 export function normalizeSurveyQuestions(questions) {
-  if (!Array.isArray(questions)) return []
+  const writableQuestions = sanitizeWritableQuestionDtos(questions)
 
-  return questions.map((question, index) => {
+  return writableQuestions.map((question, index) => {
     const normalizedType = normalizeType(question?.type, question?.uiType)
     const normalized = {
       ...question,
@@ -240,6 +489,11 @@ export function validateSurveyQuestions(questions) {
       if (rows.length < 1) {
         return { normalizedQuestions, error: `Question ${index + 1} needs at least 1 row` }
       }
+    }
+
+    const metadataError = validateQuestionOptionMetadata(question, index, normalizedQuestions)
+    if (metadataError) {
+      return { normalizedQuestions, error: metadataError }
     }
   }
 

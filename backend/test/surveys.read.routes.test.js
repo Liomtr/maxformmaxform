@@ -58,6 +58,15 @@ test('GET /api/surveys/trash lists trashed surveys through the service flow', as
   assert.equal(receivedParams.pageSize, 7)
 })
 
+test('GET /api/surveys rejects invalid folder_id query structure', async () => {
+  const { response, json } = await request('/surveys?folder_id=abc')
+
+  assert.equal(response.status, 400)
+  assert.equal(json.success, false)
+  assert.equal(json.error.code, 'VALIDATION')
+  assert.match(json.error.message, /folder_id must be an integer/i)
+})
+
 test('GET /api/surveys/share/:code returns a public survey through the service flow', async () => {
   Survey.findByShareCode = async code => ({
     id: 3,

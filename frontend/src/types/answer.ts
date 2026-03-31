@@ -1,16 +1,5 @@
-export interface Answer {
-  id: number
-  survey_id: number
-  answers_data: AnswerItem[]
-  ip_address?: string
-  user_agent?: string
-  duration?: number
-  status: 'completed' | 'incomplete'
-  submitted_at: string
-}
+import type { AnswerDTO, AnswerItemDTO } from '../../../shared/answer.contract.js'
 
-export interface AnswerItem {
-  questionId: string
-  value: unknown
-  text?: string
-}
+export type Answer = AnswerDTO
+
+export type AnswerItem = AnswerItemDTO

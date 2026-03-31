@@ -1,8 +1,8 @@
-import Survey from '../models/Survey.js'
-import Answer from '../models/Answer.js'
-import FileModel from '../models/File.js'
+import answerRepository from './answerRepository.js'
+import fileRepository from './fileRepository.js'
+import surveyRepository from './surveyRepository.js'
+import surveyResultsSnapshotRepository from './surveyResultsSnapshotRepository.js'
 import transactionManager from '../db/transaction.js'
-import { invalidateSurveyResultsSnapshots } from '../services/surveyResultsService.js'
 
 function normalizeIds(values = []) {
   return values
@@ -15,18 +15,18 @@ const surveyAggregateRepository = {
     let filesToCleanup = []
 
     const result = await transactionManager.run(async trx => {
-      const surveyIds = await Survey.listTrashIds({ creator_id: creatorId }, { db: trx })
+      const surveyIds = await surveyRepository.listTrashIds({ creator_id: creatorId }, { db: trx })
       filesToCleanup = surveyIds.length > 0
-        ? await FileModel.listBySurveyIds(surveyIds, { db: trx })
+        ? await fileRepository.listBySurveyIds(surveyIds, { db: trx })
         : []
 
       if (surveyIds.length > 0) {
-        await FileModel.deleteBySurveyIds(surveyIds, { db: trx })
-        await Answer.deleteBySurveyIds(surveyIds, { db: trx })
-        await invalidateSurveyResultsSnapshots({ surveyIds }, { db: trx })
+        await fileRepository.deleteBySurveyIds(surveyIds, { db: trx })
+        await answerRepository.deleteBySurveyIds(surveyIds, { db: trx })
+        await surveyResultsSnapshotRepository.deleteBySurveyIds(surveyIds, { db: trx })
       }
 
-      const deleted = await Survey.clearTrash({ creator_id: creatorId }, { db: trx })
+      const deleted = await surveyRepository.clearTrash({ creator_id: creatorId }, { db: trx })
       if (onTransaction) {
         await onTransaction({ trx, deleted, surveyIds })
       }
@@ -41,11 +41,11 @@ const surveyAggregateRepository = {
     let filesToCleanup = []
 
     await transactionManager.run(async trx => {
-      filesToCleanup = await FileModel.listBySurveyIds([surveyId], { db: trx })
-      await FileModel.deleteBySurveyIds([surveyId], { db: trx })
-      await Answer.deleteBySurveyIds([surveyId], { db: trx })
-      await invalidateSurveyResultsSnapshots({ surveyIds: [surveyId] }, { db: trx })
-      await Survey.delete(surveyId, { db: trx })
+      filesToCleanup = await fileRepository.listBySurveyIds([surveyId], { db: trx })
+      await fileRepository.deleteBySurveyIds([surveyId], { db: trx })
+      await answerRepository.deleteBySurveyIds([surveyId], { db: trx })
+      await surveyResultsSnapshotRepository.deleteBySurveyIds([surveyId], { db: trx })
+      await surveyRepository.delete(surveyId, { db: trx })
 
       if (onTransaction) {
         await onTransaction({ trx, surveyId })
@@ -67,7 +67,7 @@ const surveyAggregateRepository = {
     const normalizedFileIds = normalizeIds(uploadedFileIds)
 
     return transactionManager.run(async trx => {
-      const answer = await Answer.create({
+      const answer = await answerRepository.create({
         survey_id: surveyId,
         answers_data: answersData,
         ip_address: ipAddress,
@@ -75,9 +75,9 @@ const surveyAggregateRepository = {
         duration: duration || null
       }, { db: trx })
 
-      await FileModel.attachToAnswer(normalizedFileIds, answer.id, { db: trx })
-      await Survey.incrementResponseCount(surveyId, { db: trx })
-      await invalidateSurveyResultsSnapshots({ surveyIds: [surveyId] }, { db: trx })
+      await fileRepository.attachToAnswer(normalizedFileIds, answer.id, { db: trx })
+      await surveyRepository.incrementResponseCount(surveyId, { db: trx })
+      await surveyResultsSnapshotRepository.deleteBySurveyIds([surveyId], { db: trx })
 
       if (onTransaction) {
         await onTransaction({ trx, answer })
@@ -97,16 +97,16 @@ const surveyAggregateRepository = {
 
     let filesToCleanup = []
     const deleted = await transactionManager.run(async trx => {
-      filesToCleanup = await FileModel.listByAnswerIds(normalizedAnswerIds, { db: trx })
+      filesToCleanup = await fileRepository.listByAnswerIds(normalizedAnswerIds, { db: trx })
       if (filesToCleanup.length > 0) {
-        await FileModel.deleteByAnswerIds(normalizedAnswerIds, { db: trx })
+        await fileRepository.deleteByAnswerIds(normalizedAnswerIds, { db: trx })
       }
 
-      const deleted = await Answer.deleteBatch(normalizedAnswerIds, { db: trx })
+      const deleted = await answerRepository.deleteBatch(normalizedAnswerIds, { db: trx })
       for (const surveyId of normalizedSurveyIds) {
-        await Survey.syncResponseCount(surveyId, { db: trx })
+        await surveyRepository.syncResponseCount(surveyId, { db: trx })
       }
-      await invalidateSurveyResultsSnapshots({ surveyIds: normalizedSurveyIds }, { db: trx })
+      await surveyResultsSnapshotRepository.deleteBySurveyIds(normalizedSurveyIds, { db: trx })
 
       return deleted
     })

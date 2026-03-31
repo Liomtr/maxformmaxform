@@ -1,33 +1,62 @@
 import test, { afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import Answer from '../src/models/Answer.js'
-import SurveyResultsSnapshot from '../src/models/SurveyResultsSnapshot.js'
-import { getSurveyResults, resetSurveyResultsObservability } from '../src/services/surveyResultsService.js'
+import Survey from '../src/models/Survey.js'
+import answerRepository from '../src/repositories/answerRepository.js'
+import surveyResultsSnapshotRepository from '../src/repositories/surveyResultsSnapshotRepository.js'
+import { getManagedSurveyResults, getSurveyResults, resetSurveyResultsObservability } from '../src/services/surveyResultsService.js'
 
-const originalAnswerFindBySurveyId = Answer.findBySurveyId
-const originalAnswerGetAggregateState = Answer.getAggregateState
-const originalSnapshotFindBySurveyId = SurveyResultsSnapshot.findBySurveyId
-const originalSnapshotUpsert = SurveyResultsSnapshot.upsert
+const originalSurveyFindByIdentifier = Survey.findByIdentifier
+const originalAnswerListBySurveyId = answerRepository.listBySurveyId
+const originalAnswerGetAggregateState = answerRepository.getAggregateState
+const originalSnapshotFindBySurveyId = surveyResultsSnapshotRepository.findBySurveyId
+const originalSnapshotUpsert = surveyResultsSnapshotRepository.upsert
 
 afterEach(() => {
-  Answer.findBySurveyId = originalAnswerFindBySurveyId
-  Answer.getAggregateState = originalAnswerGetAggregateState
-  SurveyResultsSnapshot.findBySurveyId = originalSnapshotFindBySurveyId
-  SurveyResultsSnapshot.upsert = originalSnapshotUpsert
+  Survey.findByIdentifier = originalSurveyFindByIdentifier
+  answerRepository.listBySurveyId = originalAnswerListBySurveyId
+  answerRepository.getAggregateState = originalAnswerGetAggregateState
+  surveyResultsSnapshotRepository.findBySurveyId = originalSnapshotFindBySurveyId
+  surveyResultsSnapshotRepository.upsert = originalSnapshotUpsert
   resetSurveyResultsObservability()
+})
+
+test('getManagedSurveyResults authorizes the survey before reading results', async () => {
+  Survey.findByIdentifier = async identifier => ({
+    id: Number(identifier),
+    creator_id: 1,
+    title: 'Managed Survey',
+    questions: [],
+    updated_at: '2026-03-28T10:00:00.000Z'
+  })
+  answerRepository.getAggregateState = async () => ({
+    answerCount: 0,
+    latestAnswerId: null,
+    latestSubmittedAt: null
+  })
+  answerRepository.listBySurveyId = async () => []
+  surveyResultsSnapshotRepository.findBySurveyId = async () => null
+  surveyResultsSnapshotRepository.upsert = async payload => payload
+
+  const result = await getManagedSurveyResults({
+    actor: { sub: 1, roleCode: 'user' },
+    identifier: '106'
+  })
+
+  assert.equal(result.totalSubmissions, 0)
+  assert.equal(result.observability.snapshot.currentAccessMode, 'snapshot-rebuild')
 })
 
 test('getSurveyResults returns empty-state statistics for surveys without submissions', async () => {
   let persistedSnapshot = null
 
-  Answer.getAggregateState = async () => ({
+  answerRepository.getAggregateState = async () => ({
     answerCount: 0,
     latestAnswerId: null,
     latestSubmittedAt: null
   })
-  Answer.findBySurveyId = async () => []
-  SurveyResultsSnapshot.findBySurveyId = async () => null
-  SurveyResultsSnapshot.upsert = async payload => {
+  answerRepository.listBySurveyId = async () => []
+  surveyResultsSnapshotRepository.findBySurveyId = async () => null
+  surveyResultsSnapshotRepository.upsert = async payload => {
     persistedSnapshot = payload
     return payload
   }
@@ -78,14 +107,14 @@ test('getSurveyResults computes summary and platform breakdown for mixed submiss
   const now = new Date()
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
 
-  Answer.getAggregateState = async () => ({
+  answerRepository.getAggregateState = async () => ({
     answerCount: 2,
     latestAnswerId: 2,
     latestSubmittedAt: now.toISOString()
   })
-  SurveyResultsSnapshot.findBySurveyId = async () => null
-  SurveyResultsSnapshot.upsert = async payload => payload
-  Answer.findBySurveyId = async () => ([
+  surveyResultsSnapshotRepository.findBySurveyId = async () => null
+  surveyResultsSnapshotRepository.upsert = async payload => payload
+  answerRepository.listBySurveyId = async () => ([
     {
       id: 1,
       status: 'completed',
@@ -153,13 +182,13 @@ test('getSurveyResults tracks snapshot hit rate across rebuild and hit requests'
   let persistedSnapshot = null
   let answerReadCount = 0
 
-  Answer.getAggregateState = async () => ({
+  answerRepository.getAggregateState = async () => ({
     answerCount: 3,
     latestAnswerId: 18,
     latestSubmittedAt: '2026-03-28T12:00:00.000Z'
   })
-  SurveyResultsSnapshot.findBySurveyId = async () => persistedSnapshot
-  SurveyResultsSnapshot.upsert = async payload => {
+  surveyResultsSnapshotRepository.findBySurveyId = async () => persistedSnapshot
+  surveyResultsSnapshotRepository.upsert = async payload => {
     persistedSnapshot = {
       payload: payload.payload,
       answerCount: payload.answerCount,
@@ -169,7 +198,7 @@ test('getSurveyResults tracks snapshot hit rate across rebuild and hit requests'
     }
     return persistedSnapshot
   }
-  Answer.findBySurveyId = async () => {
+  answerRepository.listBySurveyId = async () => {
     answerReadCount += 1
     return [
       {
@@ -220,15 +249,15 @@ test('getSurveyResults tracks snapshot hit rate across rebuild and hit requests'
 })
 
 test('getSurveyResults returns the cached snapshot when source state is unchanged', async () => {
-  Answer.getAggregateState = async () => ({
+  answerRepository.getAggregateState = async () => ({
     answerCount: 3,
     latestAnswerId: 18,
     latestSubmittedAt: '2026-03-28T12:00:00.000Z'
   })
-  Answer.findBySurveyId = async () => {
-    throw new Error('findBySurveyId should not be called when snapshot is fresh')
+  answerRepository.listBySurveyId = async () => {
+    throw new Error('listBySurveyId should not be called when snapshot is fresh')
   }
-  SurveyResultsSnapshot.findBySurveyId = async () => ({
+  surveyResultsSnapshotRepository.findBySurveyId = async () => ({
     payload: { totalSubmissions: 3, total: 3, questionStats: [] },
     answerCount: 3,
     latestAnswerId: 18,
@@ -263,23 +292,23 @@ test('getSurveyResults returns the cached snapshot when source state is unchange
 test('getSurveyResults rebuilds and persists the snapshot when source state is stale', async () => {
   let persistedSnapshot = null
 
-  Answer.getAggregateState = async () => ({
+  answerRepository.getAggregateState = async () => ({
     answerCount: 1,
     latestAnswerId: 9,
     latestSubmittedAt: '2026-03-28T12:00:00.000Z'
   })
-  SurveyResultsSnapshot.findBySurveyId = async () => ({
+  surveyResultsSnapshotRepository.findBySurveyId = async () => ({
     payload: { totalSubmissions: 99 },
     answerCount: 2,
     latestAnswerId: 8,
     latestSubmittedAt: '2026-03-27T12:00:00.000Z',
     surveyUpdatedAt: '2026-03-27T09:00:00.000Z'
   })
-  SurveyResultsSnapshot.upsert = async payload => {
+  surveyResultsSnapshotRepository.upsert = async payload => {
     persistedSnapshot = payload
     return payload
   }
-  Answer.findBySurveyId = async () => ([
+  answerRepository.listBySurveyId = async () => ([
     {
       id: 9,
       status: 'completed',
@@ -322,14 +351,14 @@ test('getSurveyResults exposes large-sample baseline metrics', async () => {
     answers_data: [{ questionId: 1, questionType: 'radio', value: index % 2 === 0 ? 'yes' : 'no' }]
   }))
 
-  Answer.getAggregateState = async () => ({
+  answerRepository.getAggregateState = async () => ({
     answerCount: submissions.length,
     latestAnswerId: submissions.length,
     latestSubmittedAt: '2026-03-28T12:00:00.000Z'
   })
-  SurveyResultsSnapshot.findBySurveyId = async () => null
-  SurveyResultsSnapshot.upsert = async payload => payload
-  Answer.findBySurveyId = async () => submissions
+  surveyResultsSnapshotRepository.findBySurveyId = async () => null
+  surveyResultsSnapshotRepository.upsert = async payload => payload
+  answerRepository.listBySurveyId = async () => submissions
 
   const result = await getSurveyResults({
     survey: {

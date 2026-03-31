@@ -1,6 +1,12 @@
 import { throwManagementError, throwManagementPolicyError } from '../http/managementErrors.js'
 import { getAuthenticatedActorPolicy } from '../policies/actorPolicy.js'
 import folderRepository from '../repositories/folderRepository.js'
+import {
+  ensurePlainObjectPayload,
+  normalizeOptionalId,
+  normalizeRequiredTrimmedString
+} from '../utils/managementPayload.js'
+import { ensureQueryObject, normalizeOptionalIntegerQuery } from '../utils/queryValidation.js'
 import { recordManagementAction, runManagementTransaction } from './activity.js'
 import {
   createFolderDto,
@@ -17,12 +23,21 @@ function getFolderParentFromBody(body = {}) {
   const hasParent = hasOwn(body, 'parentId') || hasOwn(body, 'parent_id')
   return {
     hasParent,
-    parentId: hasParent ? normalizeFolderParentId(body.parentId ?? body.parent_id ?? null) : undefined
+    parentId: hasParent
+      ? normalizeFolderParentId(normalizeOptionalId(body.parentId ?? body.parent_id ?? null, {
+          field: hasOwn(body, 'parentId') ? 'parentId' : 'parent_id',
+          allowNull: true
+        }))
+      : undefined
   }
 }
 
 function ensureAuthenticated(actor) {
   throwManagementPolicyError(getAuthenticatedActorPolicy(actor))
+}
+
+function throwInvalidQuery(message) {
+  throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
 }
 
 async function ensureParentFolder(parentId, creatorId, options = {}) {
@@ -47,7 +62,13 @@ async function getManagedFolderOrThrow(folderId, actor, options = {}) {
 
 export async function listManagedFolders({ actor, query = {} }) {
   ensureAuthenticated(actor)
-  const normalized = normalizeFolderListQuery(query)
+  ensureQueryObject(query, throwInvalidQuery)
+  const normalized = normalizeFolderListQuery({
+    ...query,
+    parentId: Object.prototype.hasOwnProperty.call(query, 'parentId')
+      ? normalizeOptionalIntegerQuery(query.parentId, 'parentId', throwInvalidQuery, { allowNull: true, positive: true })
+      : undefined
+  })
 
   const list = await folderRepository.list({
     creator_id: actor.sub,
@@ -64,13 +85,17 @@ export async function listAllManagedFolders({ actor }) {
 
 export async function createManagedFolder({ actor, body = {} }) {
   ensureAuthenticated(actor)
+  body = ensurePlainObjectPayload(body)
   return runManagementTransaction(async db => {
-    const name = String(body.name || '').trim()
-    const parent_id = normalizeFolderParentId(body.parentId ?? body.parent_id ?? null)
-
-    if (!name) {
-      throwManagementError(400, MANAGEMENT_ERROR_CODES.FOLDER_NAME_REQUIRED, 'Folder name is required')
-    }
+    const name = normalizeRequiredTrimmedString(body.name, {
+      field: 'name',
+      code: MANAGEMENT_ERROR_CODES.FOLDER_NAME_REQUIRED,
+      message: 'Folder name is required'
+    })
+    const parent_id = normalizeFolderParentId(normalizeOptionalId(body.parentId ?? body.parent_id ?? null, {
+      field: hasOwn(body, 'parentId') ? 'parentId' : 'parent_id',
+      allowNull: true
+    }))
 
     await ensureParentFolder(parent_id, actor.sub, { db })
     const folder = await folderRepository.create({
@@ -102,6 +127,7 @@ export async function createManagedFolder({ actor, body = {} }) {
 
 export async function updateManagedFolder({ actor, folderId, body = {} }) {
   ensureAuthenticated(actor)
+  body = ensurePlainObjectPayload(body)
   return runManagementTransaction(async db => {
     const existing = await getManagedFolderOrThrow(folderId, actor, { db })
     const { hasParent, parentId } = getFolderParentFromBody(body)
@@ -114,10 +140,13 @@ export async function updateManagedFolder({ actor, folderId, body = {} }) {
       await ensureParentFolder(parentId, actor.sub, { db })
     }
 
-    const name = body.name === undefined ? undefined : String(body.name || '').trim()
-    if (name !== undefined && !name) {
-      throwManagementError(400, MANAGEMENT_ERROR_CODES.FOLDER_NAME_REQUIRED, 'Folder name is required')
-    }
+    const name = body.name === undefined
+      ? undefined
+      : normalizeRequiredTrimmedString(body.name, {
+          field: 'name',
+          code: MANAGEMENT_ERROR_CODES.FOLDER_NAME_REQUIRED,
+          message: 'Folder name is required'
+        })
 
     const folder = await folderRepository.update(existing.id, actor.sub, {
       name,

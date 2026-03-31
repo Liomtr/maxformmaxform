@@ -2,6 +2,12 @@ import { throwManagementError, throwManagementPolicyError } from '../http/manage
 import { getAuthenticatedActorPolicy } from '../policies/actorPolicy.js'
 import messageRepository from '../repositories/messageRepository.js'
 import {
+  ensureQueryObject,
+  normalizeOptionalBooleanQuery,
+  normalizeOptionalStringArrayQuery,
+  normalizeStrictPagination
+} from '../utils/queryValidation.js'
+import {
   createMessageDto,
   createMessagePageResult,
   MANAGEMENT_ERROR_CODES,
@@ -12,9 +18,20 @@ function ensureAuthenticated(actor) {
   throwManagementPolicyError(getAuthenticatedActorPolicy(actor))
 }
 
+function throwInvalidQuery(message) {
+  throwManagementError(400, MANAGEMENT_ERROR_CODES.INVALID_PAYLOAD, message)
+}
+
 export async function listActorMessages({ actor, query = {} }) {
   ensureAuthenticated(actor)
-  const normalized = normalizeMessageListQuery(query)
+  ensureQueryObject(query, throwInvalidQuery)
+  const pagination = normalizeStrictPagination(query, { page: 1, pageSize: 50 }, throwInvalidQuery)
+  const normalized = normalizeMessageListQuery({
+    ...query,
+    ...pagination,
+    unread: normalizeOptionalBooleanQuery(query.unread, 'unread', throwInvalidQuery),
+    types: normalizeOptionalStringArrayQuery(query.types, 'types', throwInvalidQuery)
+  })
   const result = await messageRepository.list({
     recipient_id: actor.sub,
     page: normalized.page,

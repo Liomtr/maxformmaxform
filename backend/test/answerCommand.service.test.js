@@ -7,6 +7,7 @@ import answerRepository from '../src/repositories/answerRepository.js'
 import surveyAggregateRepository from '../src/repositories/surveyAggregateRepository.js'
 import { deleteAnswersBatch } from '../src/services/answerCommandService.js'
 import { UPLOAD_DIR } from '../src/utils/uploadStorage.js'
+import { ANSWER_ERROR_CODES } from '../../shared/answer.contract.js'
 
 const originalFindByIds = answerRepository.findByIds
 const originalSurveyFindById = Survey.findById
@@ -24,7 +25,19 @@ test('deleteAnswersBatch requires ids', async () => {
       actor: { sub: 1, roleCode: 'user' },
       ids: []
     }),
-    error => error?.status === 400 && error?.body?.error?.code === 'VALIDATION'
+    error => error?.status === 400 && error?.body?.error?.code === ANSWER_ERROR_CODES.VALIDATION
+  )
+})
+
+test('deleteAnswersBatch rejects invalid id item structures', async () => {
+  await assert.rejects(
+    () => deleteAnswersBatch({
+      actor: { sub: 1, roleCode: 'user' },
+      ids: [501, { id: 502 }]
+    }),
+    error => error?.status === 400
+      && error?.body?.error?.code === ANSWER_ERROR_CODES.VALIDATION
+      && /ids\[1\] must be an integer/i.test(error?.body?.error?.message || '')
   )
 })
 

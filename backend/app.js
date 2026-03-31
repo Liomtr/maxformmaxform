@@ -21,6 +21,8 @@ import messageRoutes from './src/routes/messages.js'
 import auditRoutes from './src/routes/audits.js'
 import flowRoutes from './src/routes/flows.js'
 import repoRoutes from './src/routes/repos.js'
+import managementAiRoutes from './src/routes/managementAi.js'
+import systemConfigRoutes from './src/routes/systemConfig.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -56,6 +58,8 @@ app.use('/api/messages', messageRoutes)
 app.use('/api/audits', auditRoutes)
 app.use('/api/flows', flowRoutes)
 app.use('/api/repos', repoRoutes)
+app.use('/api/management-ai', managementAiRoutes)
+app.use('/api/system-config', systemConfigRoutes)
 
 // --- Health check ---
 app.get('/health', (_req, res) => {

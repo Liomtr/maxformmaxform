@@ -9,12 +9,13 @@ import type {
   SurveyResultOptionStatDTO,
   SurveyResultRegionStatDTO,
   SurveyResultTrendPointDTO,
+  SurveyDryRunPayloadDTO,
   SurveyResultsDTO,
-  SurveySubmitResultDTO,
+  SurveyValidationResultDTO,
   SurveyTrashListQueryDTO,
-  SurveyTrashPageDTO,
-  UploadedSurveyFileDTO
+  SurveyTrashPageDTO
 } from '../../../shared/survey.contract.js'
+import type { SurveySubmitResultDTO, UploadedSurveyFileDTO } from '../../../shared/surveyUpload.contract.js'
 
 type TrashListResponse = ApiResponse<SurveyTrashPageDTO | Survey[]> & {
   total?: number
@@ -62,6 +63,16 @@ export async function createSurvey(payload: SurveyForm): Promise<Survey> {
 
 export async function updateSurvey(id: string | number, payload: Partial<SurveyForm>): Promise<Survey> {
   const { data } = await http.put<ApiResponse<Survey>>(`/surveys/${id}`, payload)
+  return data.data!
+}
+
+export async function validateSurvey(payload: Partial<SurveyForm>): Promise<SurveyValidationResultDTO> {
+  const { data } = await http.post<ApiResponse<SurveyValidationResultDTO>>('/surveys/validate', payload)
+  return data.data!
+}
+
+export async function dryRunSurveyJson(payload: SurveyDryRunPayloadDTO): Promise<SurveyValidationResultDTO> {
+  const { data } = await http.post<ApiResponse<SurveyValidationResultDTO>>('/surveys/dry-run', payload)
   return data.data!
 }
 

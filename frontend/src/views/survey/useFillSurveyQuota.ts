@@ -1,4 +1,5 @@
 import type { QuestionOption } from '@/types/survey'
+import type { VisibleWhenDTO } from '../../../../shared/survey.contract.js'
 
 export interface FillSurveyOption extends QuestionOption {
   value: string
@@ -6,7 +7,7 @@ export interface FillSurveyOption extends QuestionOption {
   rich: boolean
   desc: string
   hidden: boolean
-  visibleWhen?: unknown[]
+  visibleWhen?: VisibleWhenDTO
   exclusive: boolean
   defaultSelected: boolean
   quotaLimit: number
